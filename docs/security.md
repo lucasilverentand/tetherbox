@@ -66,7 +66,7 @@ GitHub authentication failures during pull request publishing also pause the job
 
 ## Webhook Handling
 
-Tetherbox verifies `Linear-Signature` before parsing webhook JSON. Malformed JSON and unsupported Agent Session actions are recorded as local audit events and do not enqueue work.
+Tetherbox verifies `Linear-Signature` before parsing webhook JSON, then rejects missing, malformed, or stale `webhookTimestamp` values before handling the event. Malformed JSON and unsupported Agent Session actions are recorded as local audit events and do not enqueue work.
 
 The daemon returns a fast acknowledgement for valid webhooks, then processes the job asynchronously. This keeps Linear webhook delivery responsive while local Codex work runs separately.
 Inbox Notification webhooks are accepted without queueing Codex work and are written to the local audit trail. If Linear reports `issueUnassignedFromYou`, Tetherbox cancels active local jobs matching that Linear issue because the user explicitly removed the app from the work.

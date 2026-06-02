@@ -19,7 +19,7 @@ describe("server webhook handling", () => {
       queue,
       webhookSecret: "secret",
     });
-    const body = JSON.stringify({
+    const body = linearBody({
       action: "created",
       agentSession: {
         id: "sess_1",
@@ -181,7 +181,7 @@ describe("server webhook handling", () => {
       queue,
       webhookSecret: "secret",
     });
-    const body = JSON.stringify({
+    const body = linearBody({
       action: "prompted",
       agentSession: { id: "sess_1" },
       agentActivity: { body: "approve" },
@@ -226,7 +226,7 @@ describe("server webhook handling", () => {
       queue,
       webhookSecret: "secret",
     });
-    const body = JSON.stringify({
+    const body = linearBody({
       action: "permissionChanged",
       agentSession: { id: "sess_ignored" },
     });
@@ -263,7 +263,7 @@ describe("server webhook handling", () => {
       queue,
       webhookSecret: "secret",
     });
-    const body = JSON.stringify({
+    const body = linearBody({
       type: "PermissionChange",
       action: "teamAccessChanged",
       appUserId: "app-user-1",
@@ -316,7 +316,7 @@ describe("server webhook handling", () => {
       queue,
       webhookSecret: "secret",
     });
-    const body = JSON.stringify({
+    const body = linearBody({
       type: "OAuthApp",
       action: "revoked",
     });
@@ -358,7 +358,7 @@ describe("server webhook handling", () => {
       queue,
       webhookSecret: "secret",
     });
-    const body = JSON.stringify({
+    const body = linearBody({
       type: "AppUserNotification",
       action: "issueCommentMention",
       appUserId: "app-user-1",
@@ -431,7 +431,7 @@ describe("server webhook handling", () => {
       queue,
       webhookSecret: "secret",
     });
-    const body = JSON.stringify({
+    const body = linearBody({
       type: "AppUserNotification",
       action: "issueUnassignedFromYou",
       appUserId: "app-user-1",
@@ -525,6 +525,108 @@ describe("server webhook handling", () => {
     }
   });
 
+  test("rejects stale Linear webhook timestamps before queueing jobs", async () => {
+    const state = await loadedState();
+    const queue = new FakeQueue();
+    const handler = createRequestHandler({
+      config: { ...config, linear: { ...config.linear, webhookMaxAgeMs: 1_000 } },
+      state,
+      queue,
+      webhookSecret: "secret",
+    });
+    const body = linearBody({
+      action: "created",
+      agentSession: { id: "sess_stale" },
+    }, Date.now() - 2_000);
+
+    try {
+      const response = await handler(
+        new Request("http://127.0.0.1:8787/webhooks/linear", {
+          method: "POST",
+          headers: { "Linear-Signature": signature(body, "secret") },
+          body,
+        }),
+      );
+
+      expect(response.status).toBe(401);
+      expect(await response.json()).toMatchObject({ reason: "stale_webhook" });
+      expect(queue.jobs).toHaveLength(0);
+      expect(state.snapshot().jobs).toHaveLength(0);
+      expect(state.snapshot().events).toContainEqual(expect.objectContaining({
+        level: "warn",
+        source: "linear",
+        message: "Linear webhook timestamp is outside the accepted freshness window",
+      }));
+    } finally {
+      state.close();
+    }
+  });
+
+  test("rejects missing Linear webhook timestamps before queueing jobs", async () => {
+    const state = await loadedState();
+    const queue = new FakeQueue();
+    const handler = createRequestHandler({
+      config,
+      state,
+      queue,
+      webhookSecret: "secret",
+    });
+    const body = JSON.stringify({
+      action: "created",
+      agentSession: { id: "sess_missing_timestamp" },
+    });
+
+    try {
+      const response = await handler(
+        new Request("http://127.0.0.1:8787/webhooks/linear", {
+          method: "POST",
+          headers: { "Linear-Signature": signature(body, "secret") },
+          body,
+        }),
+      );
+
+      expect(response.status).toBe(401);
+      expect(await response.json()).toMatchObject({ reason: "missing_webhook_timestamp" });
+      expect(queue.jobs).toHaveLength(0);
+      expect(state.snapshot().jobs).toHaveLength(0);
+    } finally {
+      state.close();
+    }
+  });
+
+  test("rejects malformed Linear webhook timestamps before queueing jobs", async () => {
+    const state = await loadedState();
+    const queue = new FakeQueue();
+    const handler = createRequestHandler({
+      config,
+      state,
+      queue,
+      webhookSecret: "secret",
+    });
+    const body = JSON.stringify({
+      action: "created",
+      webhookTimestamp: "now",
+      agentSession: { id: "sess_bad_timestamp" },
+    });
+
+    try {
+      const response = await handler(
+        new Request("http://127.0.0.1:8787/webhooks/linear", {
+          method: "POST",
+          headers: { "Linear-Signature": signature(body, "secret") },
+          body,
+        }),
+      );
+
+      expect(response.status).toBe(401);
+      expect(await response.json()).toMatchObject({ reason: "invalid_webhook_timestamp" });
+      expect(queue.jobs).toHaveLength(0);
+      expect(state.snapshot().jobs).toHaveLength(0);
+    } finally {
+      state.close();
+    }
+  });
+
   test("cancels a queued job from a Linear stop signal", async () => {
     process.env.LINEAR_API_KEY = "lin_test";
     const fetchMock = mockDeferredFetch();
@@ -538,7 +640,7 @@ describe("server webhook handling", () => {
       queue,
       webhookSecret: "secret",
     });
-    const body = JSON.stringify({
+    const body = linearBody({
       action: "prompted",
       agentSession: { id: "sess_stop" },
       agentActivity: { body: "stop", signal: "stop" },
@@ -579,7 +681,7 @@ describe("server webhook handling", () => {
       queue,
       webhookSecret: "secret",
     });
-    const body = JSON.stringify({
+    const body = linearBody({
       action: "prompted",
       agentSession: { id: "sess_wait" },
       agentActivity: { body: "Please stop", signal: "stop" },
@@ -617,7 +719,7 @@ describe("server webhook handling", () => {
       queue,
       webhookSecret: "secret",
     });
-    const body = JSON.stringify({
+    const body = linearBody({
       action: "prompted",
       agentSession: { id: "sess_idle" },
       agentActivity: { body: "stop", signal: "stop" },
@@ -657,7 +759,7 @@ describe("server webhook handling", () => {
       queue,
       webhookSecret: "secret",
     });
-    const body = JSON.stringify({
+    const body = linearBody({
       action: "created",
       agentSession: {
         id: "sess_select",
@@ -743,7 +845,7 @@ describe("server webhook handling", () => {
       queue,
       webhookSecret: "secret",
     });
-    const body = JSON.stringify({
+    const body = linearBody({
       action: "prompted",
       agentSession: { id: "sess_select", promptContext: "Original issue context" },
       agentActivity: {
@@ -999,6 +1101,10 @@ function jobFixture(overrides: Partial<RoutedJob> = {}): RoutedJob {
 
 function signature(body: string, secret: string): string {
   return createHmac("sha256", secret).update(body).digest("hex");
+}
+
+function linearBody(payload: Record<string, unknown>, webhookTimestamp = Date.now()): string {
+  return JSON.stringify({ webhookTimestamp, ...payload });
 }
 
 function mockDeferredFetch(): {

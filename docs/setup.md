@@ -24,6 +24,7 @@ Edit `config.local.json`:
 - Set `server.publicUrl` to the public tunnel URL.
 - Set `state.path` to a durable local path.
 - Set `linear.webhookSecretEnv`, `linear.apiKeyEnv`, `linear.oauthClientIdEnv`, and `linear.oauthClientSecretEnv`.
+- Keep the default `linear.webhookMaxAgeMs` unless your tunnel or proxy consistently delays Linear webhooks beyond 60 seconds.
 - Add one `repos` entry for each local checkout.
 - Add policy rules under `policies`.
 
