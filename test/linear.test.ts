@@ -21,6 +21,7 @@ import {
   parseApprovalDecision,
   isStopSignal,
   listLinearAgentSessionActivities,
+  moveLinearIssueToReviewState,
   statusExternalUrl,
   syncLinearIssueForAgentSession,
   updateLinearAgentSession,
@@ -616,6 +617,149 @@ describe("Linear webhook handling", () => {
       expect(calls).toHaveLength(1);
     } finally {
       restore();
+      store.close();
+    }
+  });
+
+  test("moves Linear issues to the configured review state", async () => {
+    const calls: unknown[] = [];
+    const restore = mockFetchSequence(calls, [
+      new Response(
+        JSON.stringify({
+          data: {
+            issue: {
+              id: "issue-uuid",
+              identifier: "OSS-1",
+              state: { id: "state-start", name: "In Progress", type: "started" },
+              team: { id: "team-1" },
+            },
+          },
+        }),
+        { status: 200 },
+      ),
+      new Response(
+        JSON.stringify({
+          data: {
+            team: {
+              states: {
+                nodes: [
+                  { id: "state-review", name: "In Review", position: 2 },
+                  { id: "state-start", name: "In Progress", position: 1 },
+                ],
+              },
+            },
+          },
+        }),
+        { status: 200 },
+      ),
+      new Response(JSON.stringify({ data: { issueUpdate: { success: true, issue: { id: "issue-uuid" } } } }), {
+        status: 200,
+      }),
+    ]);
+    const store = await loadedState();
+    store.saveLinearInstallation({
+      workspaceId: "default",
+      appUserId: "app-user-1",
+      accessToken: "access-1",
+    });
+
+    try {
+      const result = await moveLinearIssueToReviewState(
+        { ...config, linear: { webhookSecretEnv: "LINEAR_WEBHOOK_SECRET", reviewStateName: "In Review" } },
+        { id: "issue-uuid", identifier: "OSS-1", labels: [] },
+        store,
+      );
+
+      expect(result).toEqual({
+        issueId: "OSS-1",
+        movedToState: "In Review",
+      });
+      expect(calls[2]).toMatchObject({
+        headers: { Authorization: "Bearer access-1" },
+        body: {
+          variables: {
+            id: "issue-uuid",
+            input: {
+              stateId: "state-review",
+            },
+          },
+        },
+      });
+    } finally {
+      restore();
+      store.close();
+    }
+  });
+
+  test("skips review transition when the configured state is missing", async () => {
+    const calls: unknown[] = [];
+    const restore = mockFetchSequence(calls, [
+      new Response(
+        JSON.stringify({
+          data: {
+            issue: {
+              id: "issue-uuid",
+              identifier: "OSS-1",
+              state: { id: "state-start", name: "In Progress", type: "started" },
+              team: { id: "team-1" },
+            },
+          },
+        }),
+        { status: 200 },
+      ),
+      new Response(
+        JSON.stringify({
+          data: {
+            team: {
+              states: {
+                nodes: [{ id: "state-start", name: "In Progress", position: 1 }],
+              },
+            },
+          },
+        }),
+        { status: 200 },
+      ),
+    ]);
+    const store = await loadedState();
+    store.saveLinearInstallation({
+      workspaceId: "default",
+      appUserId: "app-user-1",
+      accessToken: "access-1",
+    });
+
+    try {
+      const result = await moveLinearIssueToReviewState(
+        { ...config, linear: { webhookSecretEnv: "LINEAR_WEBHOOK_SECRET", reviewStateName: "Reviewing" } },
+        { id: "issue-uuid", identifier: "OSS-1", labels: [] },
+        store,
+      );
+
+      expect(result).toEqual({
+        issueId: "OSS-1",
+        skippedReason: "missing_review_state",
+      });
+      expect(calls).toHaveLength(2);
+    } finally {
+      restore();
+      store.close();
+    }
+  });
+
+  test("skips review transition without Linear API access", async () => {
+    const store = await loadedState();
+
+    try {
+      const result = await moveLinearIssueToReviewState(
+        { ...config, linear: { webhookSecretEnv: "LINEAR_WEBHOOK_SECRET" } },
+        { id: "issue-uuid", identifier: "OSS-1", labels: [] },
+        store,
+      );
+
+      expect(result).toEqual({
+        issueId: "issue-uuid",
+        skippedReason: "missing_token",
+      });
+    } finally {
       store.close();
     }
   });
