@@ -46,7 +46,10 @@ describe("server webhook handling", () => {
         handler(
           new Request("http://127.0.0.1:8787/webhooks/linear", {
             method: "POST",
-            headers: { "Linear-Signature": signature(body, "secret") },
+            headers: {
+              "Linear-Signature": signature(body, "secret"),
+              "Linear-Delivery": "delivery-intake-1",
+            },
             body,
           }),
         ),
@@ -62,6 +65,7 @@ describe("server webhook handling", () => {
       });
 
       await waitFor(() => fetchMock.pending.length === 1);
+      expect(state.getProcessedWebhook("delivery-intake-1")).toBeUndefined();
       fetchMock.resolveNext({ data: { agentSessionUpdate: { success: true } } });
       await waitFor(() => fetchMock.pending.length === 1);
       fetchMock.resolveNext({ data: { agentActivityCreate: { success: true } } });
@@ -118,6 +122,10 @@ describe("server webhook handling", () => {
       expect(queue.jobs[0]?.prompt).toContain("Keep the fix minimal.");
       expect(queue.jobs[0]?.prompt).toContain("Earlier frozen prompt from Linear.");
       expect(state.snapshot().jobs[0]?.id).toBe(queue.jobs[0]?.id);
+      expect(state.getProcessedWebhook("delivery-intake-1")).toMatchObject({
+        id: "delivery-intake-1",
+        source: "linear",
+      });
       const sessionUpdates = linearSessionUpdateInputs(fetchMock.calls, "sess_1");
       expect(sessionUpdates[0]).toMatchObject({
         externalUrls: [{
@@ -1822,6 +1830,61 @@ describe("server webhook handling", () => {
     }
   });
 
+  test("does not match full repo names as prefixes of longer repo names", async () => {
+    process.env.LINEAR_API_KEY = "lin_test";
+    const fetchMock = mockDeferredFetch();
+    const state = await loadedState();
+    const queue = new FakeQueue(state);
+    state.createRepoSelection(jobFixture({
+      id: "job-select",
+      sessionId: "sess_select",
+      prompt: "Original issue context",
+    }));
+    const handler = createRequestHandler({
+      config: {
+        ...config,
+        repos: [
+          { ...config.repos[0]!, github: "lucasilverentand/api" },
+          { ...config.repos[1]!, github: "lucasilverentand/api-extra" },
+        ],
+      },
+      state,
+      queue,
+      webhookSecret: "secret",
+    });
+    const body = linearBody({
+      action: "prompted",
+      agentSession: { id: "sess_select", promptContext: "Original issue context" },
+      agentActivity: {
+        body: "Use https://github.com/lucasilverentand/api-extra for this one.",
+      },
+    });
+
+    try {
+      const response = await handler(
+        new Request("http://127.0.0.1:8787/webhooks/linear", {
+          method: "POST",
+          headers: { "Linear-Signature": signature(body, "secret") },
+          body,
+        }),
+      );
+
+      expect(response.status).toBe(200);
+      await waitFor(() => fetchMock.pending.length === 1);
+      fetchMock.resolveNext({ data: { agentSessionUpdate: { success: true } } });
+      await waitFor(() => fetchMock.pending.length === 1);
+      fetchMock.resolveNext({ data: { agentActivityCreate: { success: true } } });
+      await waitFor(() => queue.jobs.length === 1);
+
+      expect(queue.jobs[0]?.repo.github).toBe("lucasilverentand/api-extra");
+      expect(state.getPendingRepoSelectionForSession("sess_select")).toBeUndefined();
+    } finally {
+      fetchMock.restore();
+      state.close();
+      delete process.env.LINEAR_API_KEY;
+    }
+  });
+
   test("queues the original job after a clear free-text repo name reply", async () => {
     process.env.LINEAR_API_KEY = "lin_test";
     const fetchMock = mockDeferredFetch();
@@ -1997,7 +2060,10 @@ describe("server webhook handling", () => {
     const state = await loadedState();
     const queue = new FakeQueue(state);
     const handler = createRequestHandler({
-      config: { ...config, server: { ...config.server, operatorTokenEnv: "TETHERBOX_OPERATOR_TOKEN" } },
+      config: {
+        ...config,
+        server: { ...config.server, host: "0.0.0.0", operatorTokenEnv: "TETHERBOX_OPERATOR_TOKEN" },
+      },
       state,
       queue,
       webhookSecret: "secret",
@@ -2017,6 +2083,45 @@ describe("server webhook handling", () => {
 
       expect(rejected.status).toBe(401);
       expect(await accepted.json()).toEqual({ ok: true });
+    } finally {
+      delete process.env.TETHERBOX_OPERATOR_TOKEN;
+      state.close();
+    }
+  });
+
+  test("does not trust spoofed loopback hosts for public operator APIs", async () => {
+    const state = await loadedState();
+    const queue = new FakeQueue(state);
+    const handler = createRequestHandler({
+      config: {
+        ...config,
+        server: {
+          ...config.server,
+          host: "0.0.0.0",
+          operatorTokenEnv: "TETHERBOX_OPERATOR_TOKEN",
+        },
+      },
+      state,
+      queue,
+      webhookSecret: "secret",
+    });
+    await state.createJob(jobFixture());
+    await state.updateJob("job-1", "failed", "Codex failed", { retryEligible: true });
+    process.env.TETHERBOX_OPERATOR_TOKEN = "operator-secret";
+
+    try {
+      const rejected = await handler(new Request("http://localhost/api/jobs/job-1/retry", { method: "POST" }));
+      const accepted = await handler(
+        new Request("http://localhost/api/jobs/job-1/retry", {
+          method: "POST",
+          headers: { "X-Tetherbox-Operator-Token": "operator-secret" },
+        }),
+      );
+
+      expect(rejected.status).toBe(401);
+      expect(await rejected.json()).toEqual({ ok: false, reason: "operator_auth_required" });
+      expect(await accepted.json()).toEqual({ ok: true });
+      expect(queue.jobs).toHaveLength(1);
     } finally {
       delete process.env.TETHERBOX_OPERATOR_TOKEN;
       state.close();

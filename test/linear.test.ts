@@ -952,10 +952,14 @@ describe("Linear webhook handling", () => {
       expect(url.searchParams.get("actor")).toBe("app");
       expect(url.searchParams.get("client_id")).toBe("client-1");
       expect(url.searchParams.get("redirect_uri")).toBe("https://bridge.example/oauth/linear/callback");
-      expect(url.searchParams.get("scope")).toContain("app:assignable");
-      expect(url.searchParams.get("scope")).toContain("app:mentionable");
-      expect(url.searchParams.get("scope")).toContain("customer:read");
-      expect(url.searchParams.get("scope")).toContain("initiative:read");
+      expect(url.searchParams.get("scope")?.split(",")).toEqual([
+        "read",
+        "write",
+        "app:assignable",
+        "app:mentionable",
+        "customer:read",
+        "initiative:read",
+      ]);
       expect(store.consumeLinearOAuthState("state-1")).toBeDefined();
     } finally {
       store.close();
