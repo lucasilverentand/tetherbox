@@ -74,7 +74,7 @@ Permission-change webhooks are accepted without queueing Codex work and are writ
 
 ## Network Exposure
 
-Expose only the daemon HTTP routes needed by Linear:
+Expose only the daemon HTTP routes needed by Linear. When `server.publicUrl` is configured, Tetherbox publishes local job status URLs to Linear Agent Sessions, so the public URL should point only at the intended daemon host or reverse proxy.
 
 - `/webhooks/linear`
 - `/oauth/linear/start`

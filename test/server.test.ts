@@ -126,28 +126,14 @@ describe("server webhook handling", () => {
         id: "delivery-intake-1",
         source: "linear",
       });
-      const sessionUpdates = fetchMock.calls.filter((call): call is { body: { variables: { id: string; input: unknown } } } => (
-        typeof call === "object"
-        && call !== null
-        && "body" in call
-        && typeof call.body === "object"
-        && call.body !== null
-        && "variables" in call.body
-        && typeof call.body.variables === "object"
-        && call.body.variables !== null
-        && "id" in call.body.variables
-        && call.body.variables.id === "sess_1"
-        && "input" in call.body.variables
-        && typeof call.body.variables.input === "object"
-        && call.body.variables.input !== null
-      ));
-      expect(sessionUpdates[0]?.body.variables.input).toMatchObject({
-        addedExternalUrls: [{
+      const sessionUpdates = linearSessionUpdateInputs(fetchMock.calls, "sess_1");
+      expect(sessionUpdates[0]).toMatchObject({
+        externalUrls: [{
           label: "Tetherbox job",
           url: expect.stringMatching(/^https:\/\/bridge\.example\/api\/status#sess_1-[a-f0-9]{8}$/),
         }],
       });
-      expect(sessionUpdates[1]?.body.variables.input).toMatchObject({
+      expect(sessionUpdates[1]).toMatchObject({
         addedExternalUrls: [{
           label: "Tetherbox job",
           url: expect.stringMatching(/^https:\/\/bridge\.example\/api\/status#sess_1-[a-f0-9]{8}$/),
@@ -172,6 +158,96 @@ describe("server webhook handling", () => {
           }),
         }),
       );
+    } finally {
+      fetchMock.restore();
+      state.close();
+      delete process.env.LINEAR_API_KEY;
+    }
+  });
+
+  test("omits Linear session external URLs when no public URL is configured", async () => {
+    process.env.LINEAR_API_KEY = "lin_test";
+    const fetchMock = mockDeferredFetch();
+    const state = await loadedState();
+    const queue = new FakeQueue();
+    const configWithoutPublicUrl: BridgeConfig = {
+      ...config,
+      server: {
+        host: "127.0.0.1",
+        port: 8787,
+      },
+    };
+    const handler = createRequestHandler({
+      config: configWithoutPublicUrl,
+      state,
+      queue,
+      webhookSecret: "secret",
+    });
+    const body = linearBody({
+      action: "created",
+      agentSession: {
+        id: "sess_1",
+        promptContext: "Fix this",
+        issue: {
+          id: "issue-1",
+          identifier: "OSS-1",
+          title: "Fix this",
+          description: "The checkout flow is broken.",
+          teamKey: "WEB",
+          labels: [],
+        },
+      },
+    });
+
+    try {
+      const response = await handler(
+        new Request("http://127.0.0.1:8787/webhooks/linear", {
+          method: "POST",
+          headers: { "Linear-Signature": signature(body, "secret") },
+          body,
+        }),
+      );
+
+      expect(response.status).toBe(200);
+      await waitFor(() => fetchMock.pending.length === 1);
+      const sessionUpdate = linearSessionUpdateInputs(fetchMock.calls, "sess_1")[0] as Record<string, unknown> | undefined;
+      expect(sessionUpdate).toBeDefined();
+      expect(sessionUpdate).not.toHaveProperty("externalUrls");
+      expect(sessionUpdate).not.toHaveProperty("addedExternalUrls");
+      fetchMock.resolveNext({ data: { agentSessionUpdate: { success: true } } });
+      await waitFor(() => fetchMock.pending.length === 1);
+      fetchMock.resolveNext({ data: { agentActivityCreate: { success: true } } });
+      await waitFor(() => fetchMock.pending.length === 1);
+      fetchMock.resolveNext({
+        data: {
+          issue: {
+            id: "issue-1",
+            identifier: "OSS-1",
+            state: { id: "state-start", name: "In Progress", type: "started" },
+            team: { id: "team-1" },
+            delegate: null,
+          },
+        },
+      });
+      await waitFor(() => fetchMock.pending.length === 1);
+      fetchMock.resolveNext({ data: { agentSession: { activities: { edges: [] } } } });
+      await waitFor(() => fetchMock.pending.length === 1);
+      fetchMock.resolveNext({
+        data: {
+          issueRepositorySuggestions: {
+            suggestions: [{ repositoryFullName: "lucasilverentand/web", confidence: 0.9 }],
+          },
+        },
+      });
+      await waitFor(() => fetchMock.pending.length === 1);
+      fetchMock.resolveNext({ data: { agentSessionUpdate: { success: true } } });
+      await waitFor(() => fetchMock.pending.length === 1);
+      fetchMock.resolveNext({ data: { agentActivityCreate: { success: true } } });
+      await waitFor(() => queue.jobs.length === 1);
+
+      const sessionUpdates = linearSessionUpdateInputs(fetchMock.calls, "sess_1") as Array<Record<string, unknown>>;
+      expect(sessionUpdates).toHaveLength(2);
+      expect(sessionUpdates.every((input) => !("externalUrls" in input) && !("addedExternalUrls" in input))).toBe(true);
     } finally {
       fetchMock.restore();
       state.close();
@@ -1929,6 +2005,32 @@ function mockDeferredFetch(): {
       );
     },
   };
+}
+
+function linearSessionUpdateInputs(calls: unknown[], sessionId: string): unknown[] {
+  return calls
+    .map((call) => {
+      if (
+        typeof call === "object"
+        && call !== null
+        && "body" in call
+        && typeof call.body === "object"
+        && call.body !== null
+        && "query" in call.body
+        && typeof call.body.query === "string"
+        && call.body.query.includes("agentSessionUpdate")
+        && "variables" in call.body
+        && typeof call.body.variables === "object"
+        && call.body.variables !== null
+        && "id" in call.body.variables
+        && call.body.variables.id === sessionId
+        && "input" in call.body.variables
+      ) {
+        return call.body.variables.input;
+      }
+      return undefined;
+    })
+    .filter((input) => input !== undefined);
 }
 
 function linearActivityInputs(calls: unknown[]): unknown[] {
