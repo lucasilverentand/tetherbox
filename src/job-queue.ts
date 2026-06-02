@@ -32,11 +32,13 @@ export class JobQueue {
   private accepting = true;
   private readonly pending: RoutedJob[] = [];
   private readonly running = new Map<string, RunningJob>();
+  private readonly approvalTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(private readonly options: JobQueueOptions) {
     if (!Number.isInteger(options.concurrency) || options.concurrency < 1) {
       throw new Error("Queue concurrency must be at least 1");
     }
+    this.scheduleExistingApprovalTimeouts();
   }
 
   stats(): NonNullable<DaemonState["queue"]> {
@@ -83,6 +85,7 @@ export class JobQueue {
 
     const inFlight = [...this.running.values()].map((job) => job.promise);
     if (inFlight.length === 0) {
+      this.clearApprovalTimers();
       return;
     }
 
@@ -94,6 +97,7 @@ export class JobQueue {
       }
       await Promise.allSettled(inFlight);
     }
+    this.clearApprovalTimers();
   }
 
   private pump(): void {
@@ -118,6 +122,9 @@ export class JobQueue {
     try {
       const result = await this.options.execute(job, controller.signal);
       await this.options.state.updateJob(job.id, result.status, result.message);
+      if (result.status === "waiting_approval") {
+        this.scheduleApprovalTimeout(job.id);
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Job failed";
       if (error instanceof JobCanceledError || controller.signal.aborted) {
@@ -131,6 +138,53 @@ export class JobQueue {
         retryEligible: true,
       });
     }
+  }
+
+  private scheduleExistingApprovalTimeouts(): void {
+    for (const approval of this.options.state.listPendingApprovals()) {
+      this.scheduleApprovalTimeout(approval.jobId);
+    }
+  }
+
+  private scheduleApprovalTimeout(jobId: string): void {
+    const approval = this.options.state.getPendingApprovalForJob(jobId);
+    if (!approval?.expiresAt) {
+      return;
+    }
+
+    const existing = this.approvalTimers.get(jobId);
+    if (existing) {
+      clearTimeout(existing);
+    }
+    const expiresAt = Date.parse(approval.expiresAt);
+    if (Number.isNaN(expiresAt)) {
+      return;
+    }
+    const delay = Math.max(0, expiresAt - Date.now());
+    const timer = setTimeout(() => {
+      void this.expireApproval(jobId);
+    }, delay);
+    this.approvalTimers.set(jobId, timer);
+  }
+
+  private async expireApproval(jobId: string): Promise<void> {
+    this.approvalTimers.delete(jobId);
+    const expired = this.options.state.expirePendingApproval(jobId);
+    if (!expired) {
+      return;
+    }
+
+    await this.options.state.updateJob(jobId, "canceled", "Approval timed out", {
+      retryEligible: false,
+      failureReason: "Approval timed out",
+    });
+  }
+
+  private clearApprovalTimers(): void {
+    for (const timer of this.approvalTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.approvalTimers.clear();
   }
 }
 

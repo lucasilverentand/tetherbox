@@ -27,6 +27,7 @@ export async function loadConfig(path: string): Promise<BridgeConfig> {
     queue: {
       concurrency: parsed.queue?.concurrency ?? 1,
       shutdownGraceMs: parsed.queue?.shutdownGraceMs ?? 30_000,
+      approvalTimeoutMs: parsed.queue?.approvalTimeoutMs ?? 24 * 60 * 60 * 1000,
     },
     policies: parsed.policies ?? [],
   } as BridgeConfig;

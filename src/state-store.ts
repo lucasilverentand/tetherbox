@@ -79,6 +79,7 @@ export interface PendingApprovalRecord {
   jobId: string;
   requestedAction: string;
   status: "pending" | "approved" | "denied";
+  expiresAt?: string;
 }
 
 interface PendingApprovalRow {
@@ -86,6 +87,7 @@ interface PendingApprovalRow {
   job_id: string;
   requested_action: string;
   status: "pending" | "approved" | "denied";
+  expires_at: string | null;
 }
 
 export interface PendingRepoSelectionRecord {
@@ -347,27 +349,28 @@ export class StateStore {
     return row ? jobFromRow(row) : undefined;
   }
 
-  createApproval(jobId: string, requestedAction: string): PendingApprovalRecord {
+  createApproval(jobId: string, requestedAction: string, expiresAt?: string): PendingApprovalRecord {
     const now = new Date().toISOString();
     const id = `${jobId}:approval`;
     this.requireDb()
       .query(
         `insert into approvals (
-          id, job_id, requested_action, status, created_at, updated_at
-        ) values (?, ?, ?, 'pending', ?, ?)
+          id, job_id, requested_action, status, expires_at, created_at, updated_at
+        ) values (?, ?, ?, 'pending', ?, ?, ?)
         on conflict(id) do update set
           requested_action = excluded.requested_action,
           status = 'pending',
+          expires_at = excluded.expires_at,
           updated_at = excluded.updated_at`,
       )
-      .run(id, jobId, requestedAction, now, now);
-    return { id, jobId, requestedAction, status: "pending" };
+      .run(id, jobId, requestedAction, expiresAt ?? null, now, now);
+    return { id, jobId, requestedAction, status: "pending", expiresAt };
   }
 
   getPendingApprovalForSession(sessionId: string): PendingApprovalRecord | undefined {
     const row = this.requireDb()
       .query(
-        `select approvals.id, approvals.job_id, approvals.requested_action, approvals.status
+        `select approvals.id, approvals.job_id, approvals.requested_action, approvals.status, approvals.expires_at
          from approvals
          inner join jobs on jobs.id = approvals.job_id
          where jobs.session_id = ? and approvals.status = 'pending'
@@ -382,8 +385,41 @@ export class StateStore {
           jobId: row.job_id,
           requestedAction: row.requested_action,
           status: row.status,
+          expiresAt: row.expires_at ?? undefined,
         }
       : undefined;
+  }
+
+  getPendingApprovalForJob(jobId: string): PendingApprovalRecord | undefined {
+    const row = this.requireDb()
+      .query(
+        `select id, job_id, requested_action, status, expires_at
+         from approvals
+         where job_id = ? and status = 'pending'
+         order by updated_at desc
+         limit 1`,
+      )
+      .get(jobId) as PendingApprovalRow | null;
+
+    return row ? pendingApprovalFromRow(row) : undefined;
+  }
+
+  listPendingApprovals(): PendingApprovalRecord[] {
+    return (
+      this.requireDb()
+        .query("select id, job_id, requested_action, status, expires_at from approvals where status = 'pending'")
+        .all() as PendingApprovalRow[]
+    ).map(pendingApprovalFromRow);
+  }
+
+  expirePendingApproval(jobId: string, now = new Date()): PendingApprovalRecord | undefined {
+    const pending = this.getPendingApprovalForJob(jobId);
+    if (!pending?.expiresAt || Date.parse(pending.expiresAt) > now.getTime()) {
+      return undefined;
+    }
+
+    this.resolveApproval(pending.id, "denied", "timeout");
+    return pending;
   }
 
   resolveApproval(id: string, status: "approved" | "denied", approver?: string): void {
@@ -670,6 +706,7 @@ export class StateStore {
         status text not null,
         approver text,
         linear_comment_id text,
+        expires_at text,
         created_at text not null,
         updated_at text not null
       );
@@ -703,6 +740,7 @@ export class StateStore {
       create index if not exists idx_job_events_job_id on job_events(job_id);
     `);
     this.addColumnIfMissing("jobs", "prompt", "text");
+    this.addColumnIfMissing("approvals", "expires_at", "text");
   }
 
   private ensureStartedAt(): void {
@@ -745,6 +783,16 @@ export class StateStore {
       }
     }
   }
+}
+
+function pendingApprovalFromRow(row: PendingApprovalRow): PendingApprovalRecord {
+  return {
+    id: row.id,
+    jobId: row.job_id,
+    requestedAction: row.requested_action,
+    status: row.status,
+    expiresAt: row.expires_at ?? undefined,
+  };
 }
 
 export function createJobId(sessionId: string): string {

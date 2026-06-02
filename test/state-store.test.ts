@@ -167,15 +167,32 @@ describe("StateStore", () => {
     await store.load();
     await store.createJob(jobFixture());
 
-    const approval = store.createApproval("job-1", "Run local Codex");
+    const expiresAt = "2026-06-02T12:30:00.000Z";
+    const approval = store.createApproval("job-1", "Run local Codex", expiresAt);
     expect(approval).toMatchObject({
       jobId: "job-1",
       requestedAction: "Run local Codex",
       status: "pending",
+      expiresAt,
     });
     expect(store.getPendingApprovalForSession("session-1")?.id).toBe(approval.id);
 
     store.resolveApproval(approval.id, "approved", "Luca");
+    expect(store.getPendingApprovalForSession("session-1")).toBeUndefined();
+    store.close();
+  });
+
+  test("expires pending approvals durably", async () => {
+    const path = await statePath();
+    const store = new StateStore(path);
+    await store.load();
+    await store.createJob(jobFixture());
+
+    const approval = store.createApproval("job-1", "Run local Codex", "2026-06-02T12:00:00.000Z");
+
+    expect(store.expirePendingApproval("job-1", new Date("2026-06-02T11:59:59.000Z"))).toBeUndefined();
+    expect(store.getPendingApprovalForJob("job-1")?.id).toBe(approval.id);
+    expect(store.expirePendingApproval("job-1", new Date("2026-06-02T12:00:00.000Z"))?.id).toBe(approval.id);
     expect(store.getPendingApprovalForSession("session-1")).toBeUndefined();
     store.close();
   });

@@ -117,6 +117,8 @@ Configure policy rules under `policies` in config order. The first matching rule
 
 Supported decisions are `allow_auto`, `allow_plan_only`, `require_approval`, and `deny`. The applied policy rule and decision are persisted with each job for `/api/status` and the TUI, and the runner posts the applied policy back to Linear as activity.
 
+Jobs with `require_approval` create a pending Linear approval and enter `waiting_approval`. Reply `approve` to continue, or `deny`/`cancel` to stop the job. Pending approvals expire after `queue.approvalTimeoutMs` milliseconds, defaulting to 24 hours.
+
 ## Design
 
 See [docs/design.md](docs/design.md).

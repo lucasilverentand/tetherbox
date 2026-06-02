@@ -10,7 +10,8 @@
   },
   "queue": {
     "concurrency": 1,
-    "shutdownGraceMs": 30000
+    "shutdownGraceMs": 30000,
+    "approvalTimeoutMs": 86400000
   },
   "linear": {
     "webhookSecretEnv": "LINEAR_WEBHOOK_SECRET",

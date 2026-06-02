@@ -82,6 +82,29 @@ describe("JobQueue", () => {
     state.close();
   });
 
+  test("times out jobs waiting for approval", async () => {
+    const state = await loadedState();
+    const queue = new JobQueue({
+      concurrency: 1,
+      state,
+      execute: async (job) => {
+        state.createApproval(job.id, "Run local Codex", new Date(Date.now() + 5).toISOString());
+        return { status: "waiting_approval", message: "Approval required" };
+      },
+    });
+    const job = jobFixture("job-1");
+    await state.createJob(job);
+
+    queue.enqueue(job);
+    await waitFor(() => state.snapshot().jobs[0]?.status === "canceled");
+    const record = state.snapshot().jobs[0];
+
+    expect(record?.lastMessage).toBe("Approval timed out");
+    expect(record?.retryEligible).toBe(false);
+    expect(state.getPendingApprovalForJob("job-1")).toBeUndefined();
+    state.close();
+  });
+
   test("cancels queued work and aborts in-flight work on shutdown timeout", async () => {
     const state = await loadedState();
     const queue = new JobQueue({
