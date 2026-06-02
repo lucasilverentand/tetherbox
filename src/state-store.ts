@@ -76,6 +76,12 @@ interface OAuthStateRow {
   expires_at: string;
 }
 
+export interface ProcessedWebhookRecord {
+  id: string;
+  source: string;
+  receivedAt: string;
+}
+
 export interface PendingApprovalRecord {
   id: string;
   jobId: string;
@@ -182,7 +188,7 @@ export class StateStore {
     })();
   }
 
-  async createJob(job: RoutedJob): Promise<JobRecord> {
+  async createJob(job: RoutedJob, processedWebhookDeliveryId?: string): Promise<JobRecord> {
     const db = this.requireDb();
     const now = new Date().toISOString();
     const record: JobRecord = {
@@ -261,6 +267,9 @@ export class StateStore {
         0,
         0,
       );
+      if (processedWebhookDeliveryId) {
+        this.insertProcessedWebhookDelivery(processedWebhookDeliveryId, "linear", now);
+      }
       this.insertEvent("queue", "info", `Queued job for ${record.repo}`, record.id, now);
     })();
 
@@ -459,7 +468,10 @@ export class StateStore {
       .run(status, approver ?? null, new Date().toISOString(), id);
   }
 
-  createRepoSelection(job: Pick<RoutedJob, "id" | "sessionId" | "prompt" | "issue">): PendingRepoSelectionRecord {
+  createRepoSelection(
+    job: Pick<RoutedJob, "id" | "sessionId" | "prompt" | "issue">,
+    processedWebhookDeliveryId?: string,
+  ): PendingRepoSelectionRecord {
     const db = this.requireDb();
     const now = new Date().toISOString();
     const id = `${job.sessionId}:repo-selection`;
@@ -496,6 +508,9 @@ export class StateStore {
           selected_repo = null,
           updated_at = excluded.updated_at`,
       ).run(id, job.sessionId, job.id, job.prompt, issueJson, now, now);
+      if (processedWebhookDeliveryId) {
+        this.insertProcessedWebhookDelivery(processedWebhookDeliveryId, "linear", now);
+      }
     })();
 
     return {
@@ -616,6 +631,19 @@ export class StateStore {
     this.requireDb().query("delete from workspace_installations where workspace_id = ?").run(workspaceId);
   }
 
+  claimWebhookDelivery(id: string, source = "linear"): boolean {
+    const now = new Date().toISOString();
+    const result = this.insertProcessedWebhookDelivery(id, source, now);
+    return result.changes > 0;
+  }
+
+  getProcessedWebhook(id: string): ProcessedWebhookRecord | undefined {
+    const row = this.requireDb()
+      .query("select id, source, received_at from processed_webhooks where id = ?")
+      .get(id) as { id: string; source: string; received_at: string } | null;
+    return row ? { id: row.id, source: row.source, receivedAt: row.received_at } : undefined;
+  }
+
   savePullRequest(record: {
     jobId: string;
     githubRepo: string;
@@ -689,6 +717,12 @@ export class StateStore {
         redirect_uri text not null,
         expires_at text not null,
         created_at text not null
+      );
+
+      create table if not exists processed_webhooks (
+        id text primary key,
+        source text not null,
+        received_at text not null
       );
 
       create table if not exists sessions (
@@ -774,10 +808,17 @@ export class StateStore {
       create index if not exists idx_jobs_updated_at on jobs(updated_at);
       create index if not exists idx_job_events_created_at on job_events(created_at);
       create index if not exists idx_job_events_job_id on job_events(job_id);
+      create index if not exists idx_processed_webhooks_received_at on processed_webhooks(received_at);
     `);
     this.addColumnIfMissing("jobs", "prompt", "text");
     this.addColumnIfMissing("approvals", "expires_at", "text");
     this.addColumnIfMissing("job_events", "source", "text not null default 'daemon'");
+  }
+
+  private insertProcessedWebhookDelivery(id: string, source: string, receivedAt: string): { changes: number } {
+    return this.requireDb()
+      .query("insert into processed_webhooks (id, source, received_at) values (?, ?, ?) on conflict(id) do nothing")
+      .run(id, source, receivedAt);
   }
 
   private ensureStartedAt(): void {

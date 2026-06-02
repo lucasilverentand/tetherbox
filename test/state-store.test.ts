@@ -27,6 +27,7 @@ describe("StateStore", () => {
     expect(tables).toContain("repo_selections");
     expect(tables).toContain("pull_requests");
     expect(tables).toContain("repo_mappings");
+    expect(tables).toContain("processed_webhooks");
   });
 
   test("persists jobs and events across restarts", async () => {
@@ -100,6 +101,25 @@ describe("StateStore", () => {
     const reloaded = new StateStore(path);
     await reloaded.load();
     expect(reloaded.getSessionThreadId("session-1")).toBe("thread-1");
+    reloaded.close();
+  });
+
+  test("persists processed webhook delivery IDs across restarts", async () => {
+    const path = await statePath();
+    const store = new StateStore(path);
+    await store.load();
+
+    expect(store.claimWebhookDelivery("delivery-1")).toBe(true);
+    expect(store.claimWebhookDelivery("delivery-1")).toBe(false);
+    store.close();
+
+    const reloaded = new StateStore(path);
+    await reloaded.load();
+    expect(reloaded.claimWebhookDelivery("delivery-1")).toBe(false);
+    expect(reloaded.getProcessedWebhook("delivery-1")).toMatchObject({
+      id: "delivery-1",
+      source: "linear",
+    });
     reloaded.close();
   });
 

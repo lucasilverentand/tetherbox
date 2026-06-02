@@ -164,8 +164,12 @@ export function createRequestHandler(options: RequestHandlerOptions): (request: 
         await state.addEvent("warn", timestampError.message, undefined, "linear");
         return Response.json({ error: timestampError.message, reason: timestampError.reason }, { status: 401 });
       }
+      const deliveryId = linearWebhookDeliveryId(event, request.headers.get("Linear-Delivery"));
       const managementWebhook = getLinearManagementWebhook(event);
       if (managementWebhook) {
+        if (deliveryId && !state.claimWebhookDelivery(deliveryId)) {
+          return duplicateLinearWebhookResponse(state, deliveryId);
+        }
         await handleLinearManagementWebhook(state, managementWebhook);
         return Response.json({
           ok: true,
@@ -177,6 +181,9 @@ export function createRequestHandler(options: RequestHandlerOptions): (request: 
 
       const inboxNotification = getLinearInboxNotificationWebhook(event);
       if (inboxNotification) {
+        if (deliveryId && !state.claimWebhookDelivery(deliveryId)) {
+          return duplicateLinearWebhookResponse(state, deliveryId);
+        }
         const canceledJobIds = await handleLinearInboxNotificationWebhook(state, queue, inboxNotification);
         return Response.json({
           ok: true,
@@ -189,8 +196,14 @@ export function createRequestHandler(options: RequestHandlerOptions): (request: 
 
       const action = getAgentSessionAction(event);
       if (!action) {
+        if (deliveryId && state.getProcessedWebhook(deliveryId)) {
+          return duplicateLinearWebhookResponse(state, deliveryId);
+        }
         const reason = `Ignored unsupported Linear AgentSessionEvent action: ${event.action ?? "missing"}`;
         await state.addEvent("warn", reason, undefined, "linear");
+        if (deliveryId) {
+          state.claimWebhookDelivery(deliveryId);
+        }
         return Response.json({
           ok: true,
           accepted: false,
@@ -199,14 +212,17 @@ export function createRequestHandler(options: RequestHandlerOptions): (request: 
         });
       }
       const sessionId = getSessionId(event);
+      if (deliveryId && state.getProcessedWebhook(deliveryId)) {
+        return duplicateLinearWebhookResponse(state, deliveryId);
+      }
       if (action === "prompted" && isStopSignal(event)) {
-        void handleLinearStopSignal({ config, state, queue, sessionId }).catch((error) => {
+        void handleLinearStopSignal({ config, state, queue, sessionId, deliveryId }).catch((error) => {
           console.error("Linear stop signal handling failed", error);
         });
         return Response.json({ ok: true, accepted: true, sessionId, stop: true });
       }
       const jobId = createJobId(sessionId);
-      void intakeLinearWebhook({ config, state, queue, event, sessionId, jobId }).catch((error) => {
+      void intakeLinearWebhook({ config, state, queue, event, sessionId, jobId, deliveryId }).catch((error) => {
         console.error("Linear webhook intake failed", error);
       });
       return Response.json({ ok: true, accepted: true, sessionId, jobId });
@@ -242,6 +258,29 @@ function linearWebhookTimestampError(
       reason: "stale_webhook",
       message: "Linear webhook timestamp is outside the accepted freshness window",
     };
+  }
+  return undefined;
+}
+
+async function duplicateLinearWebhookResponse(state: StateStore, deliveryId: string): Promise<Response> {
+  await state.addEvent("info", `Ignored duplicate Linear webhook delivery ${deliveryId}`, undefined, "linear");
+  return Response.json({
+    ok: true,
+    accepted: false,
+    reason: "duplicate_webhook",
+    deliveryId,
+  });
+}
+
+function linearWebhookDeliveryId(event: { webhookId?: unknown }, headerDeliveryId: string | null): string | undefined {
+  return firstNonEmptyString(event.webhookId, headerDeliveryId);
+}
+
+function firstNonEmptyString(...values: unknown[]): string | undefined {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) {
+      return value;
+    }
   }
   return undefined;
 }
@@ -409,10 +448,11 @@ interface LinearWebhookIntakeOptions {
   event: ReturnType<typeof parseLinearAgentEvent>;
   sessionId: string;
   jobId: string;
+  deliveryId?: string;
 }
 
 async function intakeLinearWebhook(options: LinearWebhookIntakeOptions): Promise<void> {
-  const { config, state, queue, event, sessionId, jobId } = options;
+  const { config, state, queue, event, sessionId, jobId, deliveryId } = options;
   const issue = getIssueContext(event);
   const replyPrompt = getPrompt(event);
   const externalUrl = statusExternalUrl(config, jobId);
@@ -460,7 +500,7 @@ async function intakeLinearWebhook(options: LinearWebhookIntakeOptions): Promise
     const repo = await routeRepoForSession(config, issue, prompt, sessionId, state);
     const policy = applyPolicy(config, issue, repo, { prompt });
     const job: RoutedJob = { id: jobId, sessionId, prompt, issue, repo, policy };
-    await state.createJob(job);
+    await state.createJob(job, deliveryId);
     await safeUpdateLinearAgentSession(config, state, sessionId, {
       ...(externalUrl ? { addedExternalUrls: [externalUrl] } : {}),
       plan: [
@@ -478,7 +518,7 @@ async function intakeLinearWebhook(options: LinearWebhookIntakeOptions): Promise
   } catch (error) {
     const message = error instanceof Error ? error.message : "Linear webhook intake failed";
     if (message === "Could not route Linear issue to a local repository") {
-      state.createRepoSelection({ id: jobId, sessionId, prompt, issue });
+      state.createRepoSelection({ id: jobId, sessionId, prompt, issue }, deliveryId);
       await safeUpdateLinearAgentSession(config, state, sessionId, {
         plan: [
           { content: "Acknowledge Linear session", status: "completed" },
@@ -511,8 +551,9 @@ async function handleLinearStopSignal(options: {
   state: StateStore;
   queue: Pick<JobQueue, "cancel">;
   sessionId: string;
+  deliveryId?: string;
 }): Promise<void> {
-  const { config, state, queue, sessionId } = options;
+  const { config, state, queue, sessionId, deliveryId } = options;
   const activeJob = state.getActiveJobForSession(sessionId);
   if (!activeJob) {
     await state.addEvent(
@@ -525,6 +566,9 @@ async function handleLinearStopSignal(options: {
       type: "response",
       body: "No active local Codex job was running.",
     });
+    if (deliveryId) {
+      state.claimWebhookDelivery(deliveryId);
+    }
     return;
   }
 
@@ -541,6 +585,9 @@ async function handleLinearStopSignal(options: {
     type: "response",
     body: "Stopped the local Codex run.",
   }, activeJob.id);
+  if (deliveryId) {
+    state.claimWebhookDelivery(deliveryId);
+  }
 }
 
 async function maybeHandleRepoSelectionReply(options: {
