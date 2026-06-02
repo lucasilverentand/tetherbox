@@ -18,6 +18,12 @@ export interface LinearExternalUrl {
   url: string;
 }
 
+export interface LinearRepositorySuggestion {
+  hostname?: string;
+  repositoryFullName: string;
+  confidence: number;
+}
+
 const LINEAR_GRAPHQL_URL = "https://api.linear.app/graphql";
 
 export function verifyLinearSignature(rawBody: string, signature: string | null, secret: string): boolean {
@@ -127,6 +133,52 @@ export async function updateLinearAgentSession(
   });
 }
 
+export async function suggestLinearRepositories(
+  config: BridgeConfig,
+  issueId: string | undefined,
+  agentSessionId: string,
+): Promise<LinearRepositorySuggestion[]> {
+  const token = getLinearApiKey(config);
+  if (!token || !issueId || config.repos.length === 0) {
+    logLinearFallback("issueRepositorySuggestions", { issueId, agentSessionId });
+    return [];
+  }
+
+  const payload = await linearGraphql<{
+    issueRepositorySuggestions?: {
+      suggestions?: LinearRepositorySuggestion[];
+    };
+  }>(token, {
+    query: `query IssueRepositorySuggestions(
+      $issueId: String!
+      $agentSessionId: String!
+      $candidateRepositories: [CandidateRepository!]!
+    ) {
+      issueRepositorySuggestions(
+        issueId: $issueId
+        agentSessionId: $agentSessionId
+        candidateRepositories: $candidateRepositories
+      ) {
+        suggestions {
+          hostname
+          repositoryFullName
+          confidence
+        }
+      }
+    }`,
+    variables: {
+      issueId,
+      agentSessionId,
+      candidateRepositories: config.repos.map((repo) => ({
+        hostname: "github.com",
+        repositoryFullName: repo.github,
+      })),
+    },
+  });
+
+  return payload.issueRepositorySuggestions?.suggestions ?? [];
+}
+
 export function statusExternalUrl(config: BridgeConfig, jobId: string): LinearExternalUrl | undefined {
   if (!config.server.publicUrl) {
     return undefined;
@@ -143,7 +195,10 @@ function getLinearApiKey(config: BridgeConfig): string | undefined {
   return envName ? process.env[envName] : undefined;
 }
 
-async function linearGraphql(token: string, body: { query: string; variables: Record<string, unknown> }): Promise<void> {
+async function linearGraphql<T>(
+  token: string,
+  body: { query: string; variables: Record<string, unknown> },
+): Promise<T> {
   const response = await fetch(LINEAR_GRAPHQL_URL, {
     method: "POST",
     headers: {
@@ -159,11 +214,13 @@ async function linearGraphql(token: string, body: { query: string; variables: Re
 
   const payload = (await response.json()) as {
     errors?: { message?: string }[];
-    data?: Record<string, unknown>;
+    data?: T;
   };
   if (payload.errors?.length) {
     throw new Error(`Linear GraphQL error: ${payload.errors.map((error) => error.message ?? "unknown").join("; ")}`);
   }
+
+  return (payload.data ?? ({} as T)) as T;
 }
 
 function logLinearFallback(operation: string, payload: unknown): void {

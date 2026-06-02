@@ -1,3 +1,4 @@
+import { suggestLinearRepositories } from "./linear";
 import type { BridgeConfig, LinearIssueContext, RepoMapping } from "./types";
 
 export function routeRepo(config: BridgeConfig, issue: LinearIssueContext, prompt: string): RepoMapping {
@@ -18,7 +19,45 @@ export function routeRepo(config: BridgeConfig, issue: LinearIssueContext, promp
   throw new Error("Could not route Linear issue to a local repository");
 }
 
-function findExplicitRepo(repos: RepoMapping[], prompt: string): RepoMapping | undefined {
+export async function routeRepoForSession(
+  config: BridgeConfig,
+  issue: LinearIssueContext,
+  prompt: string,
+  sessionId: string,
+): Promise<RepoMapping> {
+  const explicit = findExplicitRepo(config.repos, prompt);
+  if (explicit) {
+    return explicit;
+  }
+
+  const suggested = await findSuggestedRepo(config, issue, sessionId);
+  if (suggested) {
+    return suggested;
+  }
+
+  return routeRepo(config, issue, prompt);
+}
+
+export function findExplicitRepo(repos: RepoMapping[], prompt: string): RepoMapping | undefined {
   const lowered = prompt.toLowerCase();
   return repos.find((repo) => lowered.includes(repo.github.toLowerCase()));
+}
+
+async function findSuggestedRepo(
+  config: BridgeConfig,
+  issue: LinearIssueContext,
+  sessionId: string,
+): Promise<RepoMapping | undefined> {
+  const minimumConfidence = config.linear.repositorySuggestionMinConfidence ?? 0.2;
+
+  try {
+    const suggestions = await suggestLinearRepositories(config, issue.id, sessionId);
+    const best = suggestions
+      .filter((suggestion) => suggestion.confidence >= minimumConfidence)
+      .sort((left, right) => right.confidence - left.confidence)[0];
+
+    return config.repos.find((repo) => repo.github.toLowerCase() === best?.repositoryFullName.toLowerCase());
+  } catch {
+    return undefined;
+  }
 }

@@ -19,6 +19,7 @@ export interface BridgeConfig {
   linear: {
     webhookSecretEnv: string;
     apiKeyEnv?: string;
+    repositorySuggestionMinConfidence?: number;
   };
   codex: {
     bin: string;

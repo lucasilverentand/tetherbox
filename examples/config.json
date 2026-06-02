@@ -14,7 +14,8 @@
   },
   "linear": {
     "webhookSecretEnv": "LINEAR_WEBHOOK_SECRET",
-    "apiKeyEnv": "LINEAR_API_KEY"
+    "apiKeyEnv": "LINEAR_API_KEY",
+    "repositorySuggestionMinConfidence": 0.2
   },
   "codex": {
     "bin": "codex",
