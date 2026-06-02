@@ -1,7 +1,7 @@
 import { CodexAppServerClient } from "./codex-app-server";
 import { JobCanceledError, type JobQueueResult } from "./job-queue";
 import { postLinearActivity, updateLinearAgentSession, type LinearActivityContent, type LinearPlanStep } from "./linear";
-import { finalizeSuccessfulRun } from "./pr-automation";
+import { finalizeSuccessfulRun, watchPullRequestChecks } from "./pr-automation";
 import type { StateStore } from "./state-store";
 import type { BridgeConfig, RoutedJob } from "./types";
 import { prepareWorktree } from "./worktree-manager";
@@ -112,6 +112,21 @@ export async function runJob(
         parameter: job.repo.github,
         result: pullRequest.url,
       });
+      if (pullRequest.number) {
+        const checks = await watchPullRequestChecks(job.repo.github, pullRequest.number, worktree.path);
+        state.savePullRequest({
+          jobId: job.id,
+          githubRepo: job.repo.github,
+          branchName: worktree.branchName,
+          prNumber: pullRequest.number,
+          url: pullRequest.url,
+          status: checks.status,
+        });
+        await postActivity(config, state, job, {
+          type: checks.status === "failed" ? "error" : "thought",
+          body: checks.summary,
+        });
+      }
     } else {
       await postActivity(config, state, job, {
         type: "thought",

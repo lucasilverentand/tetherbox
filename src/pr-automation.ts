@@ -8,6 +8,12 @@ export interface PullRequestResult {
   number?: number;
 }
 
+export interface PullRequestCheckResult {
+  status: "passed" | "failed" | "no_checks";
+  summary: string;
+  output: string;
+}
+
 export interface CommandResult {
   stdout: string;
   stderr: string;
@@ -73,6 +79,46 @@ export async function finalizeSuccessfulRun(
     status: "created",
     url,
     number: url ? Number(url.match(/\/pull\/(\d+)/)?.[1]) || undefined : undefined,
+  };
+}
+
+export async function watchPullRequestChecks(
+  repo: string,
+  prNumber: number,
+  cwd: string,
+  runner: CommandRunner = new ProcessCommandRunner(),
+): Promise<PullRequestCheckResult> {
+  try {
+    const result = await runner.run("gh", ["pr", "checks", String(prNumber), "--repo", repo, "--watch"], cwd);
+    return parsePullRequestCheckOutput(result.stdout || result.stderr);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return parsePullRequestCheckOutput(message);
+  }
+}
+
+export function parsePullRequestCheckOutput(output: string): PullRequestCheckResult {
+  const normalized = output.trim();
+  if (/no checks reported/i.test(normalized)) {
+    return {
+      status: "no_checks",
+      summary: "No GitHub checks were reported for the pull request.",
+      output: normalized,
+    };
+  }
+
+  if (/(^|\s)(fail|failing|failure|cancelled|canceled|timed_out|timed out)(\s|$)/i.test(normalized)) {
+    return {
+      status: "failed",
+      summary: "GitHub pull request checks failed.",
+      output: normalized,
+    };
+  }
+
+  return {
+    status: "passed",
+    summary: "GitHub pull request checks passed.",
+    output: normalized,
   };
 }
 
