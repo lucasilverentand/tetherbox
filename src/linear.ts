@@ -40,6 +40,15 @@ export interface LinearIssueLifecycleResult {
   skippedReason?: "missing_issue" | "missing_token" | "missing_team" | "no_started_state" | "already_current";
 }
 
+export interface LinearAgentSessionActivity {
+  type: "thought" | "elicitation" | "action" | "response" | "error" | "prompt";
+  updatedAt?: string;
+  body?: string;
+  action?: string;
+  parameter?: string;
+  result?: string;
+}
+
 export type LinearApprovalDecision = "approve" | "deny";
 export type LinearAgentSessionAction = "created" | "prompted";
 
@@ -149,7 +158,10 @@ export function getPrompt(event: LinearAgentSessionEvent): string {
   );
 }
 
-export function buildLinearJobPrompt(event: LinearAgentSessionEvent): string {
+export function buildLinearJobPrompt(
+  event: LinearAgentSessionEvent,
+  activities: LinearAgentSessionActivity[] = [],
+): string {
   const issue = getIssueContext(event);
   const prompt = getPrompt(event);
   const promptContext = firstText(event.agentSession?.promptContext, event.promptContext);
@@ -170,6 +182,7 @@ export function buildLinearJobPrompt(event: LinearAgentSessionEvent): string {
     comment?.body ? ["", "## Current Comment", formatComment(comment)].join("\n") : undefined,
     previousComments.length ? ["", "## Previous Comments", previousComments.map(formatComment).join("\n\n")].join("\n") : undefined,
     guidance.length ? ["", "## Linear Guidance", guidance.map(formatGuidance).join("\n\n")].join("\n") : undefined,
+    activities.length ? ["", "## Agent Activity History", activities.map(formatActivity).join("\n")].join("\n") : undefined,
     promptContext && promptContext !== prompt ? ["", "## Prompt Context", promptContext].join("\n") : undefined,
     prompt ? ["", "## User Prompt", prompt].join("\n") : undefined,
   ];
@@ -292,6 +305,76 @@ export async function suggestLinearRepositories(
   });
 
   return payload.issueRepositorySuggestions?.suggestions ?? [];
+}
+
+export async function listLinearAgentSessionActivities(
+  config: BridgeConfig,
+  agentSessionId: string,
+  tokenStore?: LinearTokenStore,
+  first = 25,
+): Promise<LinearAgentSessionActivity[]> {
+  const token = await getLinearAccessToken(config, tokenStore);
+  if (!token) {
+    logLinearFallback("agentSessionActivities", { agentSessionId });
+    return [];
+  }
+
+  const payload = await linearGraphql<{
+    agentSession?: {
+      activities?: {
+        edges?: Array<{
+          node?: {
+            updatedAt?: string;
+            content?: Record<string, unknown>;
+          };
+        }>;
+      };
+    };
+  }>(token, {
+    query: `query TetherboxAgentSessionActivities($id: String!, $first: Int!) {
+      agentSession(id: $id) {
+        activities(first: $first) {
+          edges {
+            node {
+              updatedAt
+              content {
+                __typename
+                ... on AgentActivityThoughtContent {
+                  body
+                }
+                ... on AgentActivityActionContent {
+                  action
+                  parameter
+                  result
+                }
+                ... on AgentActivityElicitationContent {
+                  body
+                }
+                ... on AgentActivityResponseContent {
+                  body
+                }
+                ... on AgentActivityErrorContent {
+                  body
+                }
+                ... on AgentActivityPromptContent {
+                  body
+                }
+              }
+            }
+          }
+        }
+      }
+    }`,
+    variables: {
+      id: agentSessionId,
+      first,
+    },
+  });
+
+  return (payload.agentSession?.activities?.edges ?? [])
+    .map((edge) => activityFromNode(edge.node))
+    .filter((activity): activity is LinearAgentSessionActivity => activity !== undefined)
+    .toSorted((left, right) => (left.updatedAt ?? "").localeCompare(right.updatedAt ?? ""));
 }
 
 export async function syncLinearIssueForAgentSession(
@@ -592,6 +675,74 @@ function formatComment(comment: NonNullable<LinearAgentSessionEvent["comment"]>)
 function formatGuidance(guidance: NonNullable<LinearAgentSessionEvent["guidance"]>[number]): string {
   const source = [guidance.origin, guidance.teamName].filter(Boolean).join(" / ");
   return [source ? `Source: ${source}` : undefined, guidance.body].filter(Boolean).join("\n");
+}
+
+function activityFromNode(node: { updatedAt?: string; content?: Record<string, unknown> } | undefined): LinearAgentSessionActivity | undefined {
+  const content = node?.content;
+  if (!content) {
+    return undefined;
+  }
+
+  const typename = typeof content.__typename === "string" ? content.__typename : "";
+  const type = activityTypeFromTypename(typename);
+  if (!type) {
+    return undefined;
+  }
+
+  return {
+    type,
+    ...(node.updatedAt ? { updatedAt: node.updatedAt } : {}),
+    ...definedString("body", stringField(content, "body")),
+    ...definedString("action", stringField(content, "action")),
+    ...definedString("parameter", stringField(content, "parameter")),
+    ...definedString("result", stringField(content, "result")),
+  };
+}
+
+function activityTypeFromTypename(value: string): LinearAgentSessionActivity["type"] | undefined {
+  switch (value) {
+    case "AgentActivityThoughtContent":
+      return "thought";
+    case "AgentActivityElicitationContent":
+      return "elicitation";
+    case "AgentActivityActionContent":
+      return "action";
+    case "AgentActivityResponseContent":
+      return "response";
+    case "AgentActivityErrorContent":
+      return "error";
+    case "AgentActivityPromptContent":
+      return "prompt";
+    default:
+      return undefined;
+  }
+}
+
+function formatActivity(activity: LinearAgentSessionActivity): string {
+  const timestamp = activity.updatedAt ? `${activity.updatedAt} ` : "";
+  if (activity.type === "action") {
+    const details = [
+      activity.action,
+      activity.parameter ? `(${activity.parameter})` : undefined,
+      activity.result ? `=> ${activity.result}` : undefined,
+    ]
+      .filter(Boolean)
+      .join(" ");
+    return `- ${timestamp}action: ${details}`.trimEnd();
+  }
+
+  return `- ${timestamp}${activity.type}: ${activity.body ?? ""}`.trimEnd();
+}
+
+function stringField(record: Record<string, unknown>, key: string): string | undefined {
+  return typeof record[key] === "string" ? record[key] : undefined;
+}
+
+function definedString<K extends "body" | "action" | "parameter" | "result">(
+  key: K,
+  value: string | undefined,
+): Pick<LinearAgentSessionActivity, K> | Record<string, never> {
+  return value ? { [key]: value } as Pick<LinearAgentSessionActivity, K> : {};
 }
 
 async function exchangeLinearOAuthToken(

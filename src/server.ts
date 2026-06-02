@@ -9,6 +9,7 @@ import {
   buildLinearOAuthAuthorizationUrl,
   completeLinearOAuthCallback,
   isStopSignal,
+  listLinearAgentSessionActivities,
   parseApprovalDecision,
   parseLinearAgentEvent,
   postLinearActivity,
@@ -299,7 +300,6 @@ interface LinearWebhookIntakeOptions {
 async function intakeLinearWebhook(options: LinearWebhookIntakeOptions): Promise<void> {
   const { config, state, queue, event, sessionId, jobId } = options;
   const issue = getIssueContext(event);
-  const prompt = buildLinearJobPrompt(event);
   const replyPrompt = getPrompt(event);
   const externalUrl = statusExternalUrl(config, jobId);
   const handledApproval = await maybeHandleApprovalReply({
@@ -332,14 +332,17 @@ async function intakeLinearWebhook(options: LinearWebhookIntakeOptions): Promise
       { content: "Run Codex locally in an isolated worktree", status: "pending" },
       { content: "Report the result back to Linear", status: "pending" },
     ],
-  }, jobId);
+  }, undefined);
   await safePostLinearActivity(config, state, sessionId, {
     type: "thought",
     body: `Received Linear session ${sessionId}; routing local job ${jobId}.`,
-  }, jobId);
-  await safeSyncLinearIssueLifecycle(config, state, issue, jobId);
+  }, undefined);
+  await safeSyncLinearIssueLifecycle(config, state, issue);
 
+  let prompt = buildLinearJobPrompt(event);
   try {
+    const activities = await safeListLinearAgentSessionActivities(config, state, sessionId);
+    prompt = buildLinearJobPrompt(event, activities);
     const repo = await routeRepoForSession(config, issue, prompt, sessionId, state);
     const policy = applyPolicy(config, issue, repo, { prompt });
     const job: RoutedJob = { id: jobId, sessionId, prompt, issue, repo, policy };
@@ -369,11 +372,11 @@ async function intakeLinearWebhook(options: LinearWebhookIntakeOptions): Promise
           { content: "Run Codex locally in an isolated worktree", status: "pending" },
           { content: "Report the result back to Linear", status: "pending" },
         ],
-      }, jobId);
-      await postRepoSelection(config, state, sessionId, config.repos, jobId);
+      }, undefined);
+      await postRepoSelection(config, state, sessionId, config.repos);
       return;
     }
-    await state.addEvent("error", message, jobId, "linear");
+    await state.addEvent("error", message, undefined, "linear");
     await safeUpdateLinearAgentSession(config, state, sessionId, {
       plan: [
         { content: "Acknowledge Linear session", status: "completed" },
@@ -381,11 +384,11 @@ async function intakeLinearWebhook(options: LinearWebhookIntakeOptions): Promise
         { content: "Run Codex locally in an isolated worktree", status: "canceled" },
         { content: "Report the result back to Linear", status: "completed" },
       ],
-    }, jobId);
+    }, undefined);
     await safePostLinearActivity(config, state, sessionId, {
       type: "error",
       body: `Could not queue local job: ${message}`,
-    }, jobId);
+    }, undefined);
   }
 }
 
@@ -478,7 +481,6 @@ async function postRepoSelection(
   state: StateStore,
   sessionId: string,
   repos: RepoMapping[],
-  jobId: string,
 ): Promise<void> {
   await safePostLinearActivity(config, state, sessionId, {
     content: {
@@ -492,7 +494,7 @@ async function postRepoSelection(
         value: repo.github,
       })),
     },
-  }, jobId);
+  }, undefined);
 }
 
 function repoFromSelectionReply(
@@ -635,7 +637,6 @@ async function safeSyncLinearIssueLifecycle(
   config: BridgeConfig,
   state: StateStore,
   issue: ReturnType<typeof getIssueContext>,
-  jobId: string,
 ): Promise<void> {
   try {
     const result = await syncLinearIssueForAgentSession(config, issue, state);
@@ -646,14 +647,32 @@ async function safeSyncLinearIssueLifecycle(
           result.movedToState ? `Moved Linear issue to ${result.movedToState}` : undefined,
           result.delegateSet ? "Set Tetherbox app user as Linear delegate" : undefined,
         ]
-          .filter(Boolean)
-          .join("; "),
-        jobId,
+        .filter(Boolean)
+        .join("; "),
+        undefined,
         "linear",
       );
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to sync Linear issue lifecycle";
-    await state.addEvent("warn", message, jobId, "linear");
+    await state.addEvent("warn", message, undefined, "linear");
+  }
+}
+
+async function safeListLinearAgentSessionActivities(
+  config: BridgeConfig,
+  state: StateStore,
+  sessionId: string,
+): Promise<Awaited<ReturnType<typeof listLinearAgentSessionActivities>>> {
+  try {
+    const activities = await listLinearAgentSessionActivities(config, sessionId, state);
+    if (activities.length) {
+      await state.addEvent("info", `Fetched ${activities.length} Linear Agent Session activities`, undefined, "linear");
+    }
+    return activities;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Failed to fetch Linear Agent Session activities";
+    await state.addEvent("warn", message, undefined, "linear");
+    return [];
   }
 }

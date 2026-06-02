@@ -80,6 +80,26 @@ describe("server webhook handling", () => {
       await waitFor(() => fetchMock.pending.length === 1);
       fetchMock.resolveNext({
         data: {
+          agentSession: {
+            activities: {
+              edges: [
+                {
+                  node: {
+                    updatedAt: "2026-06-02T12:00:00.000Z",
+                    content: {
+                      __typename: "AgentActivityPromptContent",
+                      body: "Earlier frozen prompt from Linear.",
+                    },
+                  },
+                },
+              ],
+            },
+          },
+        },
+      });
+      await waitFor(() => fetchMock.pending.length === 1);
+      fetchMock.resolveNext({
+        data: {
           issueRepositorySuggestions: {
             suggestions: [{ repositoryFullName: "lucasilverentand/api", confidence: 0.9 }],
           },
@@ -96,6 +116,7 @@ describe("server webhook handling", () => {
       expect(queue.jobs[0]?.prompt).toContain("The checkout flow is broken.");
       expect(queue.jobs[0]?.prompt).toContain("The latest repro is in staging.");
       expect(queue.jobs[0]?.prompt).toContain("Keep the fix minimal.");
+      expect(queue.jobs[0]?.prompt).toContain("Earlier frozen prompt from Linear.");
       expect(state.snapshot().jobs[0]?.id).toBe(queue.jobs[0]?.id);
     } finally {
       fetchMock.restore();
@@ -432,6 +453,16 @@ describe("server webhook handling", () => {
             state: { id: "state-start", name: "In Progress", type: "started" },
             team: { id: "team-1" },
             delegate: null,
+          },
+        },
+      });
+      await waitFor(() => fetchMock.pending.length === 1);
+      fetchMock.resolveNext({
+        data: {
+          agentSession: {
+            activities: {
+              edges: [],
+            },
           },
         },
       });
