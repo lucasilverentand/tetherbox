@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { finalizeSuccessfulRun, type CommandResult, type CommandRunner } from "../src/pr-automation";
+import {
+  finalizeSuccessfulRun,
+  parsePullRequestCheckOutput,
+  watchPullRequestChecks,
+  type CommandResult,
+  type CommandRunner,
+} from "../src/pr-automation";
 import type { BridgeConfig, RoutedJob } from "../src/types";
 
 describe("pull request automation", () => {
@@ -54,6 +60,40 @@ describe("pull request automation", () => {
       args: expect.arrayContaining(["commit", "-S", "-m", "Co-authored-by: Codex <codex@openai.com>"]),
     });
   });
+
+  test("parses pull request check output", () => {
+    expect(parsePullRequestCheckOutput("build\tpass\t0m10s\thttps://example.test").status).toBe("passed");
+    expect(parsePullRequestCheckOutput("build\tfail\t0m10s\thttps://example.test").status).toBe("failed");
+    expect(parsePullRequestCheckOutput("no checks reported on the 'feature' branch").status).toBe("no_checks");
+  });
+
+  test("watches pull request checks with gh", async () => {
+    const runner = new FakeRunner([{ stdout: "build\tpass\t0m10s\thttps://example.test\n", stderr: "" }]);
+
+    const result = await watchPullRequestChecks("lucasilverentand/example", 42, "/tmp/worktree", runner);
+
+    expect(result.status).toBe("passed");
+    expect(runner.commands).toEqual([
+      {
+        kind: "run",
+        command: "gh",
+        args: ["pr", "checks", "42", "--repo", "lucasilverentand/example", "--watch"],
+        cwd: "/tmp/worktree",
+      },
+    ]);
+  });
+
+  test("records absent pull request checks from gh errors", async () => {
+    const runner = new FakeRunner([]);
+    runner.failRun = "no checks reported on the 'feature' branch";
+
+    const result = await watchPullRequestChecks("lucasilverentand/example", 42, "/tmp/worktree", runner);
+
+    expect(result).toMatchObject({
+      status: "no_checks",
+      summary: "No GitHub checks were reported for the pull request.",
+    });
+  });
 });
 
 const config: BridgeConfig = {
@@ -99,11 +139,15 @@ class FakeRunner implements CommandRunner {
     | { kind: "shell"; command: string; cwd: string }
   > = [];
   failShell = false;
+  failRun?: string;
 
   constructor(private readonly results: CommandResult[]) {}
 
   async run(command: string, args: string[], cwd: string): Promise<CommandResult> {
     this.commands.push({ kind: "run", command, args, cwd });
+    if (this.failRun) {
+      throw new Error(this.failRun);
+    }
     return this.next();
   }
 
