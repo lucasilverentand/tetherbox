@@ -83,6 +83,50 @@ describe("StateStore", () => {
     reloaded.close();
   });
 
+  test("consumes Linear OAuth state once and rejects expired state", async () => {
+    const path = await statePath();
+    const store = new StateStore(path);
+    await store.load();
+    const now = new Date("2026-06-02T12:00:00.000Z");
+
+    store.createLinearOAuthState("state-1", "https://bridge.example/oauth/linear/callback", "2026-06-02T12:05:00.000Z");
+    store.createLinearOAuthState("state-2", "https://bridge.example/oauth/linear/callback", "2026-06-02T11:59:00.000Z");
+
+    expect(store.consumeLinearOAuthState("state-1", now)?.redirectUri).toBe(
+      "https://bridge.example/oauth/linear/callback",
+    );
+    expect(store.consumeLinearOAuthState("state-1", now)).toBeUndefined();
+    expect(store.consumeLinearOAuthState("state-2", now)).toBeUndefined();
+    store.close();
+  });
+
+  test("persists Linear OAuth installations", async () => {
+    const path = await statePath();
+    const store = new StateStore(path);
+    await store.load();
+
+    store.saveLinearInstallation({
+      workspaceId: "default",
+      appUserId: "app-user-1",
+      accessToken: "access-1",
+      refreshToken: "refresh-1",
+      tokenType: "Bearer",
+      scope: "read write app:assignable app:mentionable",
+      expiresAt: "2026-06-03T12:00:00.000Z",
+    });
+    store.close();
+
+    const reloaded = new StateStore(path);
+    await reloaded.load();
+    expect(reloaded.getLinearInstallation("default")).toMatchObject({
+      workspaceId: "default",
+      appUserId: "app-user-1",
+      accessToken: "access-1",
+      refreshToken: "refresh-1",
+    });
+    reloaded.close();
+  });
+
   test("syncs repo mappings durably", async () => {
     const path = await statePath();
     const repo: RepoMapping = {

@@ -145,7 +145,7 @@ async function postActivity(
   content: LinearActivityContent,
 ): Promise<void> {
   try {
-    await postLinearActivity(config, job.sessionId, content);
+    await postLinearActivity(config, job.sessionId, content, state);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to post Linear activity";
     await state.addEvent("warn", message, job.id);
@@ -159,7 +159,7 @@ async function updatePlan(
   plan: LinearPlanStep[],
 ): Promise<void> {
   try {
-    await updateLinearAgentSession(config, job.sessionId, { plan });
+    await updateLinearAgentSession(config, job.sessionId, { plan }, state);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to update Linear agent session";
     await state.addEvent("warn", message, job.id);

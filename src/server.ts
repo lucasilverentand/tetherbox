@@ -4,6 +4,8 @@ import {
   getIssueContext,
   getPrompt,
   getSessionId,
+  buildLinearOAuthAuthorizationUrl,
+  completeLinearOAuthCallback,
   parseLinearAgentEvent,
   postLinearActivity,
   statusExternalUrl,
@@ -43,6 +45,31 @@ export async function serve(configPath: string): Promise<void> {
         return Response.json(state.snapshot(queue.stats()));
       }
 
+      if (request.method === "GET" && url.pathname === "/oauth/linear/start") {
+        try {
+          return Response.redirect(buildLinearOAuthAuthorizationUrl(config, state), 302);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Linear OAuth start failed";
+          return Response.json({ error: message }, { status: 500 });
+        }
+      }
+
+      if (request.method === "GET" && url.pathname === "/oauth/linear/callback") {
+        try {
+          const installation = await completeLinearOAuthCallback(config, state, url.searchParams);
+          return Response.json({
+            ok: true,
+            workspaceId: installation.workspaceId,
+            appUserId: installation.appUserId,
+            scope: installation.scope,
+            expiresAt: installation.expiresAt,
+          });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Linear OAuth callback failed";
+          return Response.json({ error: message }, { status: 400 });
+        }
+      }
+
       const cancelMatch = url.pathname.match(/^\/api\/jobs\/([^/]+)\/cancel$/);
       if (request.method === "POST" && cancelMatch) {
         const canceled = await queue.cancel(decodeURIComponent(cancelMatch[1]!));
@@ -65,7 +92,7 @@ export async function serve(configPath: string): Promise<void> {
         const issue = getIssueContext(event);
         const prompt = getPrompt(event);
         const sessionId = getSessionId(event);
-        const repo = await routeRepoForSession(config, issue, prompt, sessionId);
+        const repo = await routeRepoForSession(config, issue, prompt, sessionId, state);
         const policy = applyPolicy(config, issue, repo);
 
         const job = { id: createJobId(sessionId), sessionId, prompt, issue, repo, policy };
@@ -78,13 +105,13 @@ export async function serve(configPath: string): Promise<void> {
             { content: "Run Codex locally in an isolated worktree", status: "pending" },
             { content: "Report the result back to Linear", status: "pending" },
           ],
-        }).catch((error) => {
+        }, state).catch((error) => {
           console.error("Failed to update Linear agent session", error);
         });
         void postLinearActivity(config, sessionId, {
           type: "thought",
           body: `Queued local Tetherbox job ${job.id} for ${repo.github}.`,
-        }).catch((error) => {
+        }, state).catch((error) => {
           console.error("Failed to post Linear activity", error);
         });
         queue.enqueue(job);

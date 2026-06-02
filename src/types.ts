@@ -20,6 +20,10 @@ export interface BridgeConfig {
     webhookSecretEnv: string;
     apiKeyEnv?: string;
     repositorySuggestionMinConfidence?: number;
+    oauthClientIdEnv?: string;
+    oauthClientSecretEnv?: string;
+    oauthRedirectUri?: string;
+    oauthScopes?: string[];
   };
   codex: {
     bin: string;
