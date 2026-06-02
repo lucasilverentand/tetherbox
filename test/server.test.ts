@@ -46,7 +46,10 @@ describe("server webhook handling", () => {
         handler(
           new Request("http://127.0.0.1:8787/webhooks/linear", {
             method: "POST",
-            headers: { "Linear-Signature": signature(body, "secret") },
+            headers: {
+              "Linear-Signature": signature(body, "secret"),
+              "Linear-Delivery": "delivery-intake-1",
+            },
             body,
           }),
         ),
@@ -62,6 +65,7 @@ describe("server webhook handling", () => {
       });
 
       await waitFor(() => fetchMock.pending.length === 1);
+      expect(state.getProcessedWebhook("delivery-intake-1")).toBeUndefined();
       fetchMock.resolveNext({ data: { agentSessionUpdate: { success: true } } });
       await waitFor(() => fetchMock.pending.length === 1);
       fetchMock.resolveNext({ data: { agentActivityCreate: { success: true } } });
@@ -118,6 +122,10 @@ describe("server webhook handling", () => {
       expect(queue.jobs[0]?.prompt).toContain("Keep the fix minimal.");
       expect(queue.jobs[0]?.prompt).toContain("Earlier frozen prompt from Linear.");
       expect(state.snapshot().jobs[0]?.id).toBe(queue.jobs[0]?.id);
+      expect(state.getProcessedWebhook("delivery-intake-1")).toMatchObject({
+        id: "delivery-intake-1",
+        source: "linear",
+      });
       const sessionUpdates = fetchMock.calls.filter((call): call is { body: { variables: { id: string; input: unknown } } } => (
         typeof call === "object"
         && call !== null
