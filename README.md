@@ -125,6 +125,7 @@ See:
 
 - [Setup](docs/setup.md)
 - [Security](docs/security.md)
+- [Release readiness](docs/release-readiness.md)
 - [Design](docs/design.md)
 
 ## License
