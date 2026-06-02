@@ -8,6 +8,7 @@ import {
   getSessionId,
   buildLinearOAuthAuthorizationUrl,
   completeLinearOAuthCallback,
+  isStopSignal,
   parseApprovalDecision,
   parseLinearAgentEvent,
   postLinearActivity,
@@ -134,6 +135,12 @@ export function createRequestHandler(options: RequestHandlerOptions): (request: 
         });
       }
       const sessionId = getSessionId(event);
+      if (action === "prompted" && isStopSignal(event)) {
+        void handleLinearStopSignal({ config, state, queue, sessionId }).catch((error) => {
+          console.error("Linear stop signal handling failed", error);
+        });
+        return Response.json({ ok: true, accepted: true, sessionId, stop: true });
+      }
       const jobId = createJobId(sessionId);
       void intakeLinearWebhook({ config, state, queue, event, sessionId, jobId }).catch((error) => {
         console.error("Linear webhook intake failed", error);
@@ -149,7 +156,7 @@ export function createRequestHandler(options: RequestHandlerOptions): (request: 
 interface LinearWebhookIntakeOptions {
   config: BridgeConfig;
   state: StateStore;
-  queue: Pick<JobQueue, "enqueue">;
+  queue: Pick<JobQueue, "cancel" | "enqueue">;
   event: ReturnType<typeof parseLinearAgentEvent>;
   sessionId: string;
   jobId: string;
@@ -221,6 +228,38 @@ async function intakeLinearWebhook(options: LinearWebhookIntakeOptions): Promise
       body: `Could not queue local job: ${message}`,
     }, jobId);
   }
+}
+
+async function handleLinearStopSignal(options: {
+  config: BridgeConfig;
+  state: StateStore;
+  queue: Pick<JobQueue, "cancel">;
+  sessionId: string;
+}): Promise<void> {
+  const { config, state, queue, sessionId } = options;
+  const activeJob = state.getActiveJobForSession(sessionId);
+  if (!activeJob) {
+    await state.addEvent("warn", `Stop signal received for Linear session ${sessionId}, but no active job was found`);
+    await safePostLinearActivity(config, state, sessionId, {
+      type: "response",
+      body: "No active local Codex job was running.",
+    });
+    return;
+  }
+
+  const pendingApproval = state.getPendingApprovalForSession(sessionId);
+  if (pendingApproval?.jobId === activeJob.id) {
+    state.resolveApproval(pendingApproval.id, "denied");
+  }
+
+  const canceledByQueue = await queue.cancel(activeJob.id);
+  if (!canceledByQueue || activeJob.status === "waiting_approval") {
+    await state.updateJob(activeJob.id, "canceled", "Canceled by Linear stop signal");
+  }
+  await safePostLinearActivity(config, state, sessionId, {
+    type: "response",
+    body: "Stopped the local Codex run.",
+  }, activeJob.id);
 }
 
 async function maybeHandleApprovalReply(options: {
@@ -317,7 +356,7 @@ async function safePostLinearActivity(
   state: StateStore,
   sessionId: string,
   content: Parameters<typeof postLinearActivity>[2],
-  jobId: string,
+  jobId?: string,
 ): Promise<void> {
   try {
     await postLinearActivity(config, sessionId, content, state);

@@ -79,9 +79,13 @@ export interface LinearAgentSessionEvent {
   agentActivity?: {
     id?: string;
     body?: string;
+    signal?: string;
+    signalMetadata?: unknown;
     content?: {
       type?: string;
       body?: string;
+      signal?: string;
+      signalMetadata?: unknown;
     };
   };
   issue?: LinearIssueContext;

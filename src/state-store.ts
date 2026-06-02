@@ -315,6 +315,18 @@ export class StateStore {
     return row ? jobFromRow(row) : undefined;
   }
 
+  getActiveJobForSession(sessionId: string): JobRecord | undefined {
+    const row = this.requireDb()
+      .query(
+        `select * from jobs
+         where session_id = ? and status in ('queued', 'running', 'waiting_approval')
+         order by updated_at desc, created_at desc
+         limit 1`,
+      )
+      .get(sessionId) as JobRow | null;
+    return row ? jobFromRow(row) : undefined;
+  }
+
   createApproval(jobId: string, requestedAction: string): PendingApprovalRecord {
     const now = new Date().toISOString();
     const id = `${jobId}:approval`;
