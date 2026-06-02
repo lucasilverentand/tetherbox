@@ -1,4 +1,4 @@
-# Local Linear Codex Bridge Design
+# Tetherbox Design
 
 ## Goal
 
@@ -286,10 +286,10 @@ Run the daemon with `launchd`.
 Install paths:
 
 ```text
-/opt/local-linear-codex-bridge/bin/bridge
-/opt/local-linear-codex-bridge/config.yaml
-/Users/<user>/Library/Application Support/local-linear-codex-bridge/state.db
-/Users/<user>/Library/Logs/local-linear-codex-bridge/
+/opt/tetherbox/bin/bridge
+/opt/tetherbox/config.yaml
+/Users/<user>/Library/Application Support/tetherbox/state.db
+/Users/<user>/Library/Logs/tetherbox/
 ```
 
 The daemon should run as the same user who owns:
@@ -307,13 +307,13 @@ Example launchd shape:
 <plist version="1.0">
   <dict>
     <key>Label</key>
-    <string>dev.local-linear-codex-bridge</string>
+    <string>dev.tetherbox</string>
     <key>ProgramArguments</key>
     <array>
-      <string>/opt/local-linear-codex-bridge/bin/bridge</string>
+      <string>/opt/tetherbox/bin/bridge</string>
       <string>serve</string>
       <string>--config</string>
-      <string>/opt/local-linear-codex-bridge/config.yaml</string>
+      <string>/opt/tetherbox/config.yaml</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
@@ -330,10 +330,10 @@ Run the daemon with `systemd`.
 Install paths:
 
 ```text
-/opt/local-linear-codex-bridge/bin/bridge
-/etc/local-linear-codex-bridge/config.yaml
-/var/lib/local-linear-codex-bridge/state.db
-/var/log/local-linear-codex-bridge/
+/opt/tetherbox/bin/bridge
+/etc/tetherbox/config.yaml
+/var/lib/tetherbox/state.db
+/var/log/tetherbox/
 ```
 
 For a personal workstation, run as the interactive developer user. For an always-on host, create a dedicated `codex-bridge` user and install Codex, GitHub auth, SSH keys, and repo checkouts for that user.
@@ -342,15 +342,15 @@ Example unit:
 
 ```ini
 [Unit]
-Description=Local Linear Codex Bridge
+Description=Tetherbox
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
 User=codex-bridge
-WorkingDirectory=/var/lib/local-linear-codex-bridge
-ExecStart=/opt/local-linear-codex-bridge/bin/bridge serve --config /etc/local-linear-codex-bridge/config.yaml
+WorkingDirectory=/var/lib/tetherbox
+ExecStart=/opt/tetherbox/bin/bridge serve --config /etc/tetherbox/config.yaml
 Restart=always
 RestartSec=5
 
@@ -507,7 +507,7 @@ Reasonable later changes:
 Create a repository with:
 
 ```text
-local-linear-codex-bridge/
+tetherbox/
   apps/
     daemon/
   packages/

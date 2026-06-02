@@ -3,10 +3,13 @@ import { getIssueContext, getPrompt, getSessionId, parseLinearAgentEvent, verify
 import { applyPolicy } from "./policy";
 import { routeRepo } from "./repo-router";
 import { runJob } from "./job-runner";
+import { createJobId, StateStore } from "./state-store";
 
 export async function serve(configPath: string): Promise<void> {
   const config = await loadConfig(configPath);
   const webhookSecret = getRequiredEnv(config.linear.webhookSecretEnv);
+  const state = new StateStore(config.state?.path ?? "state/daemon.json");
+  await state.load();
 
   const server = Bun.serve({
     hostname: config.server.host,
@@ -15,7 +18,11 @@ export async function serve(configPath: string): Promise<void> {
       const url = new URL(request.url);
 
       if (request.method === "GET" && url.pathname === "/healthz") {
-        return Response.json({ ok: true });
+        return Response.json({ ok: true, startedAt: state.snapshot().startedAt });
+      }
+
+      if (request.method === "GET" && url.pathname === "/api/status") {
+        return Response.json(state.snapshot());
       }
 
       if (request.method !== "POST" || url.pathname !== "/webhooks/linear") {
@@ -37,14 +44,15 @@ export async function serve(configPath: string): Promise<void> {
         const repo = routeRepo(config, issue, prompt);
         const policy = applyPolicy(config, issue, repo);
 
-        const job = { sessionId, prompt, issue, repo, policy };
+        const job = { id: createJobId(sessionId), sessionId, prompt, issue, repo, policy };
+        await state.createJob(job);
         queueMicrotask(() => {
-          runJob(config, job).catch((error) => {
+          runJob(config, job, state).catch((error) => {
             console.error("Job failed", error);
           });
         });
 
-        return Response.json({ ok: true, queued: true, sessionId });
+        return Response.json({ ok: true, queued: true, sessionId, jobId: job.id });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unhandled webhook error";
         return Response.json({ error: message }, { status: 400 });
@@ -52,5 +60,5 @@ export async function serve(configPath: string): Promise<void> {
     },
   });
 
-  console.log(`local-linear-codex-bridge listening on http://${server.hostname}:${server.port}`);
+  console.log(`tetherbox listening on http://${server.hostname}:${server.port}`);
 }

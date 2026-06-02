@@ -42,8 +42,8 @@ export class CodexAppServerClient {
 
     await this.request("initialize", {
       clientInfo: {
-        name: "local_linear_codex_bridge",
-        title: "Local Linear Codex Bridge",
+        name: "tetherbox",
+        title: "Tetherbox",
         version: "0.1.0",
       },
     });

@@ -7,6 +7,10 @@ export interface BridgeConfig {
     host: string;
     port: number;
   };
+  state?: {
+    path: string;
+    worktreeRetentionDays?: number;
+  };
   linear: {
     webhookSecretEnv: string;
     apiKeyEnv?: string;
@@ -60,6 +64,7 @@ export interface LinearAgentSessionEvent {
 }
 
 export interface RoutedJob {
+  id: string;
   sessionId: string;
   prompt: string;
   issue: LinearIssueContext;
@@ -76,4 +81,36 @@ export interface AppliedPolicy {
 export interface CodexNotification {
   method?: string;
   params?: Record<string, unknown>;
+}
+
+export type JobStatus = "queued" | "running" | "waiting_approval" | "denied" | "completed" | "failed";
+
+export interface JobRecord {
+  id: string;
+  sessionId: string;
+  status: JobStatus;
+  repo: string;
+  branchName?: string;
+  worktreePath?: string;
+  issueIdentifier?: string;
+  issueTitle?: string;
+  policyRule: string;
+  policyDecision: PolicyDecision;
+  createdAt: string;
+  updatedAt: string;
+  lastMessage: string;
+}
+
+export interface DaemonState {
+  startedAt: string;
+  jobs: JobRecord[];
+  events: DaemonEvent[];
+}
+
+export interface DaemonEvent {
+  id: string;
+  jobId?: string;
+  level: "info" | "warn" | "error";
+  message: string;
+  createdAt: string;
 }
