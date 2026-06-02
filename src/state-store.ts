@@ -192,7 +192,7 @@ export class StateStore {
     })();
   }
 
-  async createJob(job: RoutedJob): Promise<JobRecord> {
+  async createJob(job: RoutedJob, processedWebhookDeliveryId?: string): Promise<JobRecord> {
     const db = this.requireDb();
     const now = new Date().toISOString();
     const record: JobRecord = {
@@ -275,6 +275,9 @@ export class StateStore {
         0,
         0,
       );
+      if (processedWebhookDeliveryId) {
+        this.insertProcessedWebhookDelivery(processedWebhookDeliveryId, "linear", now);
+      }
       this.insertEvent("queue", "info", `Queued job for ${record.repo}`, record.id, now);
     })();
 
@@ -493,7 +496,10 @@ export class StateStore {
       .run(status, approver ?? null, new Date().toISOString(), id);
   }
 
-  createRepoSelection(job: Pick<RoutedJob, "id" | "sessionId" | "linearWorkspaceId" | "prompt" | "issue">): PendingRepoSelectionRecord {
+  createRepoSelection(
+    job: Pick<RoutedJob, "id" | "sessionId" | "linearWorkspaceId" | "prompt" | "issue">,
+    processedWebhookDeliveryId?: string,
+  ): PendingRepoSelectionRecord {
     const db = this.requireDb();
     const now = new Date().toISOString();
     const id = `${job.sessionId}:repo-selection`;
@@ -531,6 +537,9 @@ export class StateStore {
           selected_repo = null,
           updated_at = excluded.updated_at`,
       ).run(id, job.sessionId, job.linearWorkspaceId ?? null, job.id, job.prompt, issueJson, now, now);
+      if (processedWebhookDeliveryId) {
+        this.insertProcessedWebhookDelivery(processedWebhookDeliveryId, "linear", now);
+      }
     })();
 
     return {
@@ -669,9 +678,7 @@ export class StateStore {
 
   claimWebhookDelivery(id: string, source = "linear"): boolean {
     const now = new Date().toISOString();
-    const result = this.requireDb()
-      .query("insert into processed_webhooks (id, source, received_at) values (?, ?, ?) on conflict(id) do nothing")
-      .run(id, source, now);
+    const result = this.insertProcessedWebhookDelivery(id, source, now);
     return result.changes > 0;
   }
 
@@ -857,6 +864,12 @@ export class StateStore {
     this.addColumnIfMissing("sessions", "issue_team_id", "text");
     this.addColumnIfMissing("approvals", "expires_at", "text");
     this.addColumnIfMissing("job_events", "source", "text not null default 'daemon'");
+  }
+
+  private insertProcessedWebhookDelivery(id: string, source: string, receivedAt: string): { changes: number } {
+    return this.requireDb()
+      .query("insert into processed_webhooks (id, source, received_at) values (?, ?, ?) on conflict(id) do nothing")
+      .run(id, source, receivedAt);
   }
 
   private ensureStartedAt(): void {

@@ -85,7 +85,7 @@ Run the daemon as the same user that owns Codex auth, GitHub auth, SSH keys, and
 
 ## Linear Webhook
 
-Create a Linear OAuth application for the agent and install it with `actor=app`. Request `app:assignable` so issues can be delegated to the agent and `app:mentionable` so users can mention it in comments, documents, and other editor surfaces. Tetherbox also requests `customer:read` and `initiative:read` by default so delegated work can include customer request and initiative context; write-level customer or initiative scopes are not requested unless you add them to `linear.oauthScopes`. Enable the Agent session events, Inbox Notifications, Permission changes, and OAuth app webhook categories.
+Create a Linear OAuth application for the agent and install it with `actor=app`. Request `app:assignable` so issues can be delegated to the agent and `app:mentionable` so users can mention it in comments, documents, and other editor surfaces. Tetherbox also requests `customer:read` and `initiative:read` by default so delegated work can include customer request and initiative context; write-level customer or initiative scopes are not requested unless you override `linear.oauthScopes` with an explicit full scope list. Enable the Agent session events, Inbox Notifications, Permission changes, and OAuth app webhook categories.
 
 Configure the Linear agent app webhook URL:
 
