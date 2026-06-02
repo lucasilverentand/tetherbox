@@ -101,6 +101,7 @@ export function renderTui(state: DaemonState, ui: TuiUiState, options: Pick<TuiO
   );
   lines.push("");
   lines.push(`Daemon: ${formatDate(state.startedAt)} | Jobs: ${state.jobs.length} | Events: ${state.events.length}`);
+  lines.push(formatLinearStatus(state));
   if (state.queue) {
     const accepting = state.queue.accepting ? "accepting" : "draining";
     lines.push(
@@ -260,6 +261,20 @@ function renderEventDetail(lines: string[], event: DaemonEvent | undefined): voi
   lines.push(`Created: ${event.createdAt}`);
   lines.push("");
   lines.push(event.message);
+}
+
+function formatLinearStatus(state: DaemonState): string {
+  const linear = state.linear;
+  if (!linear?.installed) {
+    return "Linear: not installed";
+  }
+
+  const details = [
+    linear.appUserId ? `app ${linear.appUserId}` : undefined,
+    linear.expiresAt ? `expires ${formatDate(linear.expiresAt)}` : undefined,
+    linear.scope ? `scope ${truncate(linear.scope, 48)}` : undefined,
+  ].filter(Boolean);
+  return `Linear: installed${details.length ? ` | ${details.join(" | ")}` : ""}`;
 }
 
 function formatJob(job: JobRecord): string {

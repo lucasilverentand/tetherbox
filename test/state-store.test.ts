@@ -145,6 +145,7 @@ describe("StateStore", () => {
     const store = new StateStore(path);
     await store.load();
 
+    expect(store.snapshot().linear).toEqual({ installed: false });
     store.saveLinearInstallation({
       workspaceId: "default",
       appUserId: "app-user-1",
@@ -164,8 +165,16 @@ describe("StateStore", () => {
       accessToken: "access-1",
       refreshToken: "refresh-1",
     });
+    expect(reloaded.snapshot().linear).toEqual({
+      installed: true,
+      workspaceId: "default",
+      appUserId: "app-user-1",
+      scope: "read write app:assignable app:mentionable",
+      expiresAt: "2026-06-03T12:00:00.000Z",
+    });
     reloaded.deleteLinearInstallation("default");
     expect(reloaded.getLinearInstallation("default")).toBeUndefined();
+    expect(reloaded.snapshot().linear).toEqual({ installed: false });
     reloaded.close();
   });
 
@@ -349,6 +358,7 @@ describe("StateStore", () => {
     store.close();
 
     expect(typeof snapshot.startedAt).toBe("string");
+    expect(snapshot.linear).toEqual({ installed: false });
     expect(Array.isArray(snapshot.jobs)).toBe(true);
     expect(Array.isArray(snapshot.events)).toBe(true);
     expect(snapshot.jobs[0]).toMatchObject({
