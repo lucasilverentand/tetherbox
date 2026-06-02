@@ -6,19 +6,19 @@
     <string>dev.tetherbox</string>
     <key>ProgramArguments</key>
     <array>
-      <string>/usr/bin/env</string>
-      <string>bun</string>
-      <string>run</string>
-      <string>src/index.ts</string>
-      <string>daemon</string>
-      <string>--config</string>
-      <string>/Users/luca/.config/tetherbox/config.json</string>
+      <string>/bin/sh</string>
+      <string>-lc</string>
+      <string>. "$HOME/.config/tetherbox/tetherbox.env"; exec bun run src/index.ts daemon --config "$HOME/.config/tetherbox/config.json"</string>
     </array>
     <key>WorkingDirectory</key>
-    <string>/Volumes/DevDisk/Developer/lucasilverentand/tetherbox</string>
+    <string>/path/to/tetherbox</string>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
     <true/>
+    <key>StandardOutPath</key>
+    <string>/Users/YOU/Library/Logs/tetherbox.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/YOU/Library/Logs/tetherbox.err.log</string>
   </dict>
 </plist>

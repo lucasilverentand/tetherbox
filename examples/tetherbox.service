@@ -5,7 +5,8 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=%h/src/tetherbox
+WorkingDirectory=/path/to/tetherbox
+EnvironmentFile=-%h/.config/tetherbox/tetherbox.env
 ExecStart=/usr/bin/env bun run src/index.ts daemon --config %h/.config/tetherbox/config.json
 Restart=always
 RestartSec=5

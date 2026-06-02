@@ -178,12 +178,21 @@ When the key exists, Tetherbox runs `git -c gpg.format=ssh -c user.signingKey=<p
 
 ## Service Install
 
-Example service definitions live in `examples/`:
+Tetherbox installs as a user service. Install and run it as the same user that owns Codex auth, GitHub auth, SSH keys, and local repository checkouts.
 
-- `dev.tetherbox.plist` for macOS `launchd`.
-- `tetherbox.service` for Linux `systemd --user`.
+Default local paths:
 
-Run the service as the same user that has Codex, GitHub, Git, and local repo access. Keep secrets in the service manager's environment mechanism or in a local env file with restrictive file permissions.
+- Config: `~/.config/tetherbox/config.json`
+- Optional env file: `~/.config/tetherbox/tetherbox.env`
+- SQLite state: set `state.path` to a durable user-owned path such as `~/.local/state/tetherbox/daemon.sqlite`
+- Job worktrees: stored under the configured state directory, in `worktrees/`
+
+Install docs:
+
+- macOS `launchd`: [docs/install-macos.md](install-macos.md)
+- Linux `systemd --user`: [docs/install-linux.md](install-linux.md)
+
+Template service definitions live in `examples/`, while the install scripts generate host-specific files from the current repo path and config path.
 
 ## Local Integration Harness
 
