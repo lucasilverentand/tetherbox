@@ -56,7 +56,7 @@ Use these settings:
 
 - Redirect URL: `${server.publicUrl}/oauth/linear/callback`
 - Webhook URL: `${server.publicUrl}/webhooks/linear`
-- Webhook categories: Agent session events, Permission changes, OAuth app
+- Webhook categories: Agent session events, Inbox Notifications, Permission changes, OAuth app
 - OAuth scopes: `read`, `write`, `app:assignable`, `app:mentionable`
 
 Install the app actor by opening:
@@ -75,7 +75,7 @@ After successful implementation, created or updated GitHub pull requests are add
 Set Linear's webhook signing secret in the env var named by `linear.webhookSecretEnv`.
 
 Tetherbox verifies `Linear-Signature` with HMAC-SHA256 over the raw request body. Invalid signatures are rejected before parsing JSON.
-Agent Session webhooks can queue or steer local Codex jobs. Permission-change webhooks only record local audit events, and OAuth app revocation webhooks remove the stored app actor token so the daemon will require reinstall before it can post Linear activity or update delegated issues again.
+Agent Session webhooks can queue or steer local Codex jobs. Inbox Notification webhooks record local audit events for direct app-user involvement, and `issueUnassignedFromYou` cancels matching active local jobs. Permission-change webhooks only record local audit events, and OAuth app revocation webhooks remove the stored app actor token so the daemon will require reinstall before it can post Linear activity or update delegated issues again.
 
 ## Tunnel Options
 

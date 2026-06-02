@@ -7,10 +7,12 @@ import {
   buildLinearJobPrompt,
   buildLinearOAuthAuthorizationUrl,
   completeLinearOAuthCallback,
+  formatLinearInboxNotificationWebhookEvent,
   formatLinearManagementWebhookEvent,
   getAgentActivitySignal,
   getAgentSessionAction,
   getIssueContext,
+  getLinearInboxNotificationWebhook,
   getLinearManagementWebhook,
   getPrompt,
   getSessionId,
@@ -100,6 +102,40 @@ describe("Linear webhook handling", () => {
     expect(formatLinearManagementWebhookEvent(permissionChange!)).toContain("removed teams: team-2");
     expect(revoked).toEqual({ type: "OAuthApp", action: "revoked" });
     expect(formatLinearManagementWebhookEvent(revoked!)).toContain("OAuth app was revoked");
+  });
+
+  test("recognizes Linear app-user inbox notification webhooks", () => {
+    const notification = getLinearInboxNotificationWebhook(
+      parseLinearAgentEvent(
+        JSON.stringify({
+          type: "AppUserNotification",
+          action: "issueUnassignedFromYou",
+          appUserId: "app-user-1",
+          notification: {
+            issue: {
+              id: "issue-1",
+              identifier: "OSS-256",
+              title: "Handle inbox notification webhooks",
+              url: "https://linear.app/seventwo/issue/OSS-256",
+            },
+          },
+        }),
+      ),
+    );
+
+    expect(notification).toEqual({
+      type: "AppUserNotification",
+      action: "issueUnassignedFromYou",
+      appUserId: "app-user-1",
+      issue: {
+        id: "issue-1",
+        identifier: "OSS-256",
+        title: "Handle inbox notification webhooks",
+        url: "https://linear.app/seventwo/issue/OSS-256",
+      },
+    });
+    expect(formatLinearInboxNotificationWebhookEvent(notification!)).toContain("issueUnassignedFromYou");
+    expect(formatLinearInboxNotificationWebhookEvent(notification!)).toContain("OSS-256");
   });
 
   test("rejects malformed Linear webhook payloads", () => {

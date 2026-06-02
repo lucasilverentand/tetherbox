@@ -83,6 +83,7 @@ export interface LinearAgentSessionEvent {
   removedTeamIds?: string[];
   webhookTimestamp?: number;
   webhookId?: string;
+  notification?: unknown;
   agentSession?: {
     id: string;
     issue?: LinearIssueContext;

@@ -351,6 +351,35 @@ export class StateStore {
     return row ? jobFromRow(row) : undefined;
   }
 
+  listActiveJobsForIssue(issue: Pick<LinearIssueContext, "id" | "identifier">): JobRecord[] {
+    if (!issue.id && !issue.identifier) {
+      return [];
+    }
+
+    return (
+      this.requireDb()
+        .query(
+          `select jobs.* from jobs
+           inner join sessions on sessions.id = jobs.session_id
+           where jobs.status in ('queued', 'running', 'waiting_approval')
+             and (
+               (? is not null and sessions.issue_id = ?)
+               or (? is not null and jobs.issue_identifier = ?)
+               or (? is not null and jobs.issue_identifier = ?)
+             )
+           order by jobs.updated_at desc, jobs.created_at desc`,
+        )
+        .all(
+          issue.id ?? null,
+          issue.id ?? null,
+          issue.identifier ?? null,
+          issue.identifier ?? null,
+          issue.id ?? null,
+          issue.id ?? null,
+        ) as JobRow[]
+    ).map((row) => jobFromRow(row));
+  }
+
   createApproval(jobId: string, requestedAction: string, expiresAt?: string): PendingApprovalRecord {
     const now = new Date().toISOString();
     const id = `${jobId}:approval`;

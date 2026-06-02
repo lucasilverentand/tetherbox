@@ -2,9 +2,11 @@ import { loadConfig, getRequiredEnv } from "./config";
 import { assertSupportedCodexCli } from "./codex-version";
 import {
   buildLinearJobPrompt,
+  formatLinearInboxNotificationWebhookEvent,
   formatLinearManagementWebhookEvent,
   getAgentSessionAction,
   getIssueContext,
+  getLinearInboxNotificationWebhook,
   getPrompt,
   getSessionId,
   getLinearManagementWebhook,
@@ -168,6 +170,18 @@ export function createRequestHandler(options: RequestHandlerOptions): (request: 
         });
       }
 
+      const inboxNotification = getLinearInboxNotificationWebhook(event);
+      if (inboxNotification) {
+        const canceledJobIds = await handleLinearInboxNotificationWebhook(state, queue, inboxNotification);
+        return Response.json({
+          ok: true,
+          accepted: true,
+          eventType: inboxNotification.type,
+          action: inboxNotification.action,
+          canceledJobIds,
+        });
+      }
+
       const action = getAgentSessionAction(event);
       if (!action) {
         const reason = `Ignored unsupported Linear AgentSessionEvent action: ${event.action ?? "missing"}`;
@@ -209,6 +223,41 @@ async function handleLinearManagementWebhook(
   }
 
   await state.addEvent("info", formatLinearManagementWebhookEvent(event), undefined, "linear");
+}
+
+async function handleLinearInboxNotificationWebhook(
+  state: StateStore,
+  queue: Pick<JobQueue, "cancel">,
+  event: NonNullable<ReturnType<typeof getLinearInboxNotificationWebhook>>,
+): Promise<string[]> {
+  await state.addEvent("info", formatLinearInboxNotificationWebhookEvent(event), undefined, "linear");
+  if (event.action !== "issueUnassignedFromYou" || !event.issue) {
+    return [];
+  }
+
+  const activeJobs = state.listActiveJobsForIssue(event.issue);
+  const canceledJobIds: string[] = [];
+  for (const job of activeJobs) {
+    const pendingApproval = state.getPendingApprovalForJob(job.id);
+    if (pendingApproval) {
+      state.resolveApproval(pendingApproval.id, "denied", "Linear unassignment");
+    }
+
+    const canceledByQueue = await queue.cancel(job.id);
+    if (!canceledByQueue || job.status === "waiting_approval") {
+      await state.updateJob(job.id, "canceled", "Canceled because the Linear app user was unassigned from the issue", {
+        retryEligible: false,
+        failureReason: "Linear app user unassigned from issue",
+      });
+    }
+    await state.addEvent("warn", "Canceled job because the Linear app user was unassigned from the issue", job.id, "linear");
+    canceledJobIds.push(job.id);
+  }
+
+  if (!canceledJobIds.length) {
+    await state.addEvent("warn", "Linear app user was unassigned from an issue, but no matching active job was found", undefined, "linear");
+  }
+  return canceledJobIds;
 }
 
 function isOperatorRequest(config: BridgeConfig, request: Request, url: URL): boolean {
