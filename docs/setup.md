@@ -66,6 +66,7 @@ https://your-public-host.example.com/oauth/linear/start
 ```
 
 Tetherbox redirects to Linear with `actor=app`, validates callback state, exchanges the OAuth code, and stores the app actor token in SQLite.
+That stored app user ID is also used to set the issue delegate when a session starts. If the delegated issue is still in backlog or another non-started state, Tetherbox moves it to the team's first started workflow state before queueing local Codex work.
 
 ## Webhook Configuration
 

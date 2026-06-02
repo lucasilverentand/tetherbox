@@ -33,6 +33,13 @@ export interface LinearRepositorySuggestion {
   confidence: number;
 }
 
+export interface LinearIssueLifecycleResult {
+  issueId?: string;
+  movedToState?: string;
+  delegateSet?: boolean;
+  skippedReason?: "missing_issue" | "missing_token" | "missing_team" | "no_started_state" | "already_current";
+}
+
 export type LinearApprovalDecision = "approve" | "deny";
 export type LinearAgentSessionAction = "created" | "prompted";
 
@@ -287,6 +294,56 @@ export async function suggestLinearRepositories(
   return payload.issueRepositorySuggestions?.suggestions ?? [];
 }
 
+export async function syncLinearIssueForAgentSession(
+  config: BridgeConfig,
+  issue: LinearIssueContext,
+  tokenStore?: LinearTokenStore,
+): Promise<LinearIssueLifecycleResult> {
+  const issueId = issue.id ?? issue.identifier;
+  if (!issueId) {
+    return { skippedReason: "missing_issue" };
+  }
+
+  const token = await getLinearAccessToken(config, tokenStore);
+  if (!token) {
+    logLinearFallback("issueLifecycleSync", { issueId });
+    return { issueId, skippedReason: "missing_token" };
+  }
+
+  const current = await fetchLinearIssueForLifecycle(token, issueId);
+  if (!current) {
+    return { issueId, skippedReason: "missing_issue" };
+  }
+
+  const update: { stateId?: string; delegateId?: string } = {};
+  const result: LinearIssueLifecycleResult = { issueId: current.identifier ?? current.id };
+  const currentStateType = current.state?.type;
+  if (currentStateType && !["started", "completed", "canceled"].includes(currentStateType)) {
+    if (!current.team?.id) {
+      return { ...result, skippedReason: "missing_team" };
+    }
+    const startedState = await fetchFirstStartedState(token, current.team.id);
+    if (!startedState) {
+      return { ...result, skippedReason: "no_started_state" };
+    }
+    update.stateId = startedState.id;
+    result.movedToState = startedState.name;
+  }
+
+  const appUserId = tokenStore?.getLinearInstallation("default")?.appUserId;
+  if (!current.delegate?.id && appUserId) {
+    update.delegateId = appUserId;
+    result.delegateSet = true;
+  }
+
+  if (!update.stateId && !update.delegateId) {
+    return { ...result, skippedReason: "already_current" };
+  }
+
+  await updateLinearIssue(token, current.id, update);
+  return result;
+}
+
 export function buildLinearOAuthAuthorizationUrl(
   config: BridgeConfig,
   stateStore: LinearOAuthStateStore,
@@ -416,6 +473,96 @@ async function linearGraphql<T>(
   }
 
   return (payload.data ?? ({} as T)) as T;
+}
+
+async function fetchLinearIssueForLifecycle(
+  token: string,
+  issueId: string,
+): Promise<
+  | {
+      id: string;
+      identifier?: string;
+      state?: { id: string; name: string; type?: string };
+      team?: { id: string };
+      delegate?: { id: string } | null;
+    }
+  | undefined
+> {
+  const data = await linearGraphql<{
+    issue?: {
+      id: string;
+      identifier?: string;
+      state?: { id: string; name: string; type?: string };
+      team?: { id: string };
+      delegate?: { id: string } | null;
+    };
+  }>(token, {
+    query: `query TetherboxIssueLifecycle($id: String!) {
+      issue(id: $id) {
+        id
+        identifier
+        state {
+          id
+          name
+          type
+        }
+        team {
+          id
+        }
+        delegate {
+          id
+        }
+      }
+    }`,
+    variables: { id: issueId },
+  });
+  return data.issue;
+}
+
+async function fetchFirstStartedState(
+  token: string,
+  teamId: string,
+): Promise<{ id: string; name: string; position: number } | undefined> {
+  const data = await linearGraphql<{
+    team?: {
+      states?: {
+        nodes?: Array<{ id: string; name: string; position: number }>;
+      };
+    };
+  }>(token, {
+    query: `query TetherboxTeamStartedStatuses($teamId: String!) {
+      team(id: $teamId) {
+        states(filter: { type: { eq: "started" } }) {
+          nodes {
+            id
+            name
+            position
+          }
+        }
+      }
+    }`,
+    variables: { teamId },
+  });
+
+  return data.team?.states?.nodes?.toSorted((left, right) => left.position - right.position)[0];
+}
+
+async function updateLinearIssue(
+  token: string,
+  issueId: string,
+  input: { stateId?: string; delegateId?: string },
+): Promise<void> {
+  await linearGraphql(token, {
+    query: `mutation TetherboxIssueUpdate($id: String!, $input: IssueUpdateInput!) {
+      issueUpdate(id: $id, input: $input) {
+        success
+        issue {
+          id
+        }
+      }
+    }`,
+    variables: { id: issueId, input: redactValue(input) },
+  });
 }
 
 function logLinearFallback(operation: string, payload: unknown): void {

@@ -17,6 +17,7 @@ import {
   parseApprovalDecision,
   isStopSignal,
   statusExternalUrl,
+  syncLinearIssueForAgentSession,
   updateLinearAgentSession,
   verifyLinearSignature,
 } from "../src/linear";
@@ -302,6 +303,122 @@ describe("Linear webhook handling", () => {
   test("builds public status URLs when configured", () => {
     expect(statusExternalUrl(config, "job/1")?.url).toBe("https://bridge.example/api/status#job%2F1");
     expect(statusExternalUrl({ ...config, server: { host: "127.0.0.1", port: 8787 } }, "job/1")).toBeUndefined();
+  });
+
+  test("moves delegated issues to the first started state and sets the app delegate", async () => {
+    const calls: unknown[] = [];
+    const restore = mockFetchSequence(calls, [
+      new Response(
+        JSON.stringify({
+          data: {
+            issue: {
+              id: "issue-uuid",
+              identifier: "OSS-1",
+              state: { id: "state-backlog", name: "Backlog", type: "backlog" },
+              team: { id: "team-1" },
+              delegate: null,
+            },
+          },
+        }),
+        { status: 200 },
+      ),
+      new Response(
+        JSON.stringify({
+          data: {
+            team: {
+              states: {
+                nodes: [
+                  { id: "state-later", name: "Reviewing", position: 2 },
+                  { id: "state-start", name: "In Progress", position: 1 },
+                ],
+              },
+            },
+          },
+        }),
+        { status: 200 },
+      ),
+      new Response(JSON.stringify({ data: { issueUpdate: { success: true, issue: { id: "issue-uuid" } } } }), {
+        status: 200,
+      }),
+    ]);
+    const store = await loadedState();
+    store.saveLinearInstallation({
+      workspaceId: "default",
+      appUserId: "app-user-1",
+      accessToken: "access-1",
+    });
+
+    try {
+      const result = await syncLinearIssueForAgentSession(
+        { ...config, linear: { webhookSecretEnv: "LINEAR_WEBHOOK_SECRET" } },
+        { id: "issue-uuid", identifier: "OSS-1", labels: [] },
+        store,
+      );
+
+      expect(result).toEqual({
+        issueId: "OSS-1",
+        movedToState: "In Progress",
+        delegateSet: true,
+      });
+      expect(calls[2]).toMatchObject({
+        headers: { Authorization: "Bearer access-1" },
+        body: {
+          variables: {
+            id: "issue-uuid",
+            input: {
+              stateId: "state-start",
+              delegateId: "app-user-1",
+            },
+          },
+        },
+      });
+    } finally {
+      restore();
+      store.close();
+    }
+  });
+
+  test("skips issue lifecycle updates when status and delegate are already current", async () => {
+    const calls: unknown[] = [];
+    const restore = mockFetchSequence(calls, [
+      new Response(
+        JSON.stringify({
+          data: {
+            issue: {
+              id: "issue-uuid",
+              identifier: "OSS-1",
+              state: { id: "state-start", name: "In Progress", type: "started" },
+              team: { id: "team-1" },
+              delegate: { id: "app-user-1" },
+            },
+          },
+        }),
+        { status: 200 },
+      ),
+    ]);
+    const store = await loadedState();
+    store.saveLinearInstallation({
+      workspaceId: "default",
+      appUserId: "app-user-1",
+      accessToken: "access-1",
+    });
+
+    try {
+      const result = await syncLinearIssueForAgentSession(
+        { ...config, linear: { webhookSecretEnv: "LINEAR_WEBHOOK_SECRET" } },
+        { id: "issue-uuid", identifier: "OSS-1", labels: [] },
+        store,
+      );
+
+      expect(result).toEqual({
+        issueId: "OSS-1",
+        skippedReason: "already_current",
+      });
+      expect(calls).toHaveLength(1);
+    } finally {
+      restore();
+      store.close();
+    }
   });
 
   test("builds Linear OAuth app actor authorization URLs", async () => {

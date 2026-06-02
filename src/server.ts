@@ -13,6 +13,7 @@ import {
   parseLinearAgentEvent,
   postLinearActivity,
   statusExternalUrl,
+  syncLinearIssueForAgentSession,
   updateLinearAgentSession,
   verifyLinearSignature,
 } from "./linear";
@@ -336,6 +337,7 @@ async function intakeLinearWebhook(options: LinearWebhookIntakeOptions): Promise
     type: "thought",
     body: `Received Linear session ${sessionId}; routing local job ${jobId}.`,
   }, jobId);
+  await safeSyncLinearIssueLifecycle(config, state, issue, jobId);
 
   try {
     const repo = await routeRepoForSession(config, issue, prompt, sessionId, state);
@@ -625,6 +627,33 @@ async function safePostLinearActivity(
     await postLinearActivity(config, sessionId, content, state);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to post Linear activity";
+    await state.addEvent("warn", message, jobId, "linear");
+  }
+}
+
+async function safeSyncLinearIssueLifecycle(
+  config: BridgeConfig,
+  state: StateStore,
+  issue: ReturnType<typeof getIssueContext>,
+  jobId: string,
+): Promise<void> {
+  try {
+    const result = await syncLinearIssueForAgentSession(config, issue, state);
+    if (result.movedToState || result.delegateSet) {
+      await state.addEvent(
+        "info",
+        [
+          result.movedToState ? `Moved Linear issue to ${result.movedToState}` : undefined,
+          result.delegateSet ? "Set Tetherbox app user as Linear delegate" : undefined,
+        ]
+          .filter(Boolean)
+          .join("; "),
+        jobId,
+        "linear",
+      );
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Failed to sync Linear issue lifecycle";
     await state.addEvent("warn", message, jobId, "linear");
   }
 }

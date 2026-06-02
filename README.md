@@ -104,6 +104,7 @@ https://your-public-host.example.com/oauth/linear/start
 ```
 
 Tetherbox redirects to Linear with `actor=app`, validates the callback state, exchanges the authorization code, stores the app actor token in SQLite, and refreshes stored tokens before GraphQL calls when needed.
+When an installed app actor starts work on an issue, Tetherbox follows Linear agent best practices by moving the issue into the team's first started workflow state when needed and setting the stored app user as the issue delegate when no delegate is already set.
 
 ## Policy Config
 

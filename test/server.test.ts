@@ -68,6 +68,18 @@ describe("server webhook handling", () => {
       await waitFor(() => fetchMock.pending.length === 1);
       fetchMock.resolveNext({
         data: {
+          issue: {
+            id: "issue-1",
+            identifier: "OSS-1",
+            state: { id: "state-start", name: "In Progress", type: "started" },
+            team: { id: "team-1" },
+            delegate: null,
+          },
+        },
+      });
+      await waitFor(() => fetchMock.pending.length === 1);
+      fetchMock.resolveNext({
+        data: {
           issueRepositorySuggestions: {
             suggestions: [{ repositoryFullName: "lucasilverentand/api", confidence: 0.9 }],
           },
@@ -411,6 +423,18 @@ describe("server webhook handling", () => {
       fetchMock.resolveNext({ data: { agentSessionUpdate: { success: true } } });
       await waitFor(() => fetchMock.pending.length === 1);
       fetchMock.resolveNext({ data: { agentActivityCreate: { success: true } } });
+      await waitFor(() => fetchMock.pending.length === 1);
+      fetchMock.resolveNext({
+        data: {
+          issue: {
+            id: "issue-230",
+            identifier: "OSS-230",
+            state: { id: "state-start", name: "In Progress", type: "started" },
+            team: { id: "team-1" },
+            delegate: null,
+          },
+        },
+      });
       await waitFor(() => fetchMock.pending.length === 1);
       fetchMock.resolveNext({ data: { agentSessionUpdate: { success: true } } });
       await waitFor(() => fetchMock.pending.length === 1);
