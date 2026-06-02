@@ -1,0 +1,186 @@
+import { createHmac } from "node:crypto";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, test } from "bun:test";
+import { createRequestHandler } from "../src/server";
+import { StateStore } from "../src/state-store";
+import type { BridgeConfig, DaemonState, RoutedJob } from "../src/types";
+
+describe("server webhook handling", () => {
+  test("acknowledges Linear webhooks before async job intake finishes", async () => {
+    process.env.LINEAR_API_KEY = "lin_test";
+    const fetchMock = mockDeferredFetch();
+    const state = await loadedState();
+    const queue = new FakeQueue();
+    const handler = createRequestHandler({
+      config,
+      state,
+      queue,
+      webhookSecret: "secret",
+    });
+    const body = JSON.stringify({
+      agentSession: {
+        id: "sess_1",
+        promptContext: "Fix this",
+        issue: {
+          id: "issue-1",
+          identifier: "OSS-1",
+          title: "Fix this",
+          teamKey: "WEB",
+          labels: [],
+        },
+      },
+    });
+
+    try {
+      const response = await Promise.race([
+        handler(
+          new Request("http://127.0.0.1:8787/webhooks/linear", {
+            method: "POST",
+            headers: { "Linear-Signature": signature(body, "secret") },
+            body,
+          }),
+        ),
+        sleep(50).then(() => "timeout" as const),
+      ]);
+
+      expect(response).not.toBe("timeout");
+      expect(fetchMock.pending).toHaveLength(1);
+      expect(queue.jobs).toHaveLength(0);
+      expect(await (response as Response).json()).toMatchObject({
+        ok: true,
+        accepted: true,
+        sessionId: "sess_1",
+      });
+
+      fetchMock.resolveNext({ data: { agentSessionUpdate: { success: true } } });
+      await waitFor(() => fetchMock.pending.length === 1);
+      fetchMock.resolveNext({ data: { agentActivityCreate: { success: true } } });
+      await waitFor(() => fetchMock.pending.length === 1);
+      fetchMock.resolveNext({
+        data: {
+          issueRepositorySuggestions: {
+            suggestions: [{ repositoryFullName: "lucasilverentand/api", confidence: 0.9 }],
+          },
+        },
+      });
+      await waitFor(() => fetchMock.pending.length === 1);
+      fetchMock.resolveNext({ data: { agentSessionUpdate: { success: true } } });
+      await waitFor(() => fetchMock.pending.length === 1);
+      fetchMock.resolveNext({ data: { agentActivityCreate: { success: true } } });
+      await waitFor(() => queue.jobs.length === 1);
+
+      expect(queue.jobs[0]?.repo.github).toBe("lucasilverentand/api");
+      expect(state.snapshot().jobs[0]?.id).toBe(queue.jobs[0]?.id);
+    } finally {
+      fetchMock.restore();
+      state.close();
+      delete process.env.LINEAR_API_KEY;
+    }
+  });
+});
+
+const config: BridgeConfig = {
+  server: { host: "127.0.0.1", port: 8787, publicUrl: "https://bridge.example" },
+  linear: {
+    webhookSecretEnv: "LINEAR_WEBHOOK_SECRET",
+    apiKeyEnv: "LINEAR_API_KEY",
+    repositorySuggestionMinConfidence: 0.5,
+  },
+  codex: { bin: "codex", sandbox: "workspace-write" },
+  repos: [
+    {
+      linearTeams: ["WEB"],
+      github: "lucasilverentand/web",
+      localPath: "/tmp/web",
+      defaultBase: "main",
+    },
+    {
+      linearTeams: ["API"],
+      github: "lucasilverentand/api",
+      localPath: "/tmp/api",
+      defaultBase: "main",
+    },
+  ],
+  policies: [],
+};
+
+class FakeQueue {
+  jobs: RoutedJob[] = [];
+
+  enqueue(job: RoutedJob): void {
+    this.jobs.push(job);
+  }
+
+  async cancel(): Promise<boolean> {
+    return false;
+  }
+
+  stats(): NonNullable<DaemonState["queue"]> {
+    return {
+      accepting: true,
+      concurrency: 1,
+      running: 0,
+      queued: this.jobs.length,
+    };
+  }
+}
+
+async function loadedState(): Promise<StateStore> {
+  const dir = await mkdtemp(join(tmpdir(), "server-webhook-"));
+  const state = new StateStore(join(dir, "daemon.sqlite"));
+  await state.load();
+  return state;
+}
+
+function signature(body: string, secret: string): string {
+  return createHmac("sha256", secret).update(body).digest("hex");
+}
+
+function mockDeferredFetch(): {
+  pending: Array<{ resolve: (value: Response) => void }>;
+  restore: () => void;
+  resolveNext: (body: unknown) => void;
+} {
+  const original = globalThis.fetch;
+  const pending: Array<{ resolve: (value: Response) => void }> = [];
+  globalThis.fetch = (() => {
+    return new Promise<Response>((resolve) => {
+      pending.push({ resolve });
+    });
+  }) as typeof fetch;
+
+  return {
+    pending,
+    restore: () => {
+      globalThis.fetch = original;
+    },
+    resolveNext: (body: unknown) => {
+      const next = pending.shift();
+      if (!next) {
+        throw new Error("No pending fetch");
+      }
+      next.resolve(
+        new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    },
+  };
+}
+
+async function waitFor(predicate: () => boolean): Promise<void> {
+  const started = Date.now();
+  while (!predicate()) {
+    if (Date.now() - started > 1_000) {
+      throw new Error("Timed out waiting for condition");
+    }
+    await sleep(1);
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
