@@ -8,8 +8,9 @@ import { createJobId, StateStore } from "./state-store";
 export async function serve(configPath: string): Promise<void> {
   const config = await loadConfig(configPath);
   const webhookSecret = getRequiredEnv(config.linear.webhookSecretEnv);
-  const state = new StateStore(config.state?.path ?? "state/daemon.json");
+  const state = new StateStore(config.state?.path ?? "state/daemon.sqlite");
   await state.load();
+  state.syncRepoMappings(config.repos);
 
   const server = Bun.serve({
     hostname: config.server.host,

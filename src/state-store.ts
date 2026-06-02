@@ -1,35 +1,104 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
+import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
-import type { DaemonEvent, DaemonState, JobRecord, JobStatus, RoutedJob } from "./types";
+import { Database } from "bun:sqlite";
+import type { DaemonEvent, DaemonState, JobRecord, JobStatus, RepoMapping, RoutedJob } from "./types";
 import type { WorktreeInfo } from "./worktree-manager";
 
+interface JobRow {
+  id: string;
+  session_id: string;
+  status: JobStatus;
+  repo: string;
+  branch_name: string | null;
+  worktree_path: string | null;
+  issue_identifier: string | null;
+  issue_title: string | null;
+  policy_rule: string;
+  policy_decision: JobRecord["policyDecision"];
+  created_at: string;
+  updated_at: string;
+  last_message: string;
+}
+
+interface EventRow {
+  id: string;
+  job_id: string | null;
+  level: DaemonEvent["level"];
+  message: string;
+  created_at: string;
+}
+
+interface MetadataRow {
+  value: string;
+}
+
 export class StateStore {
-  private state: DaemonState = {
-    startedAt: new Date().toISOString(),
-    jobs: [],
-    events: [],
-  };
+  private db?: Database;
 
   constructor(private readonly path: string) {}
 
   async load(): Promise<void> {
-    try {
-      const raw = await readFile(this.path, "utf8");
-      this.state = JSON.parse(raw) as DaemonState;
-    } catch (error) {
-      if ((error as { code?: string }).code !== "ENOENT") {
-        throw error;
-      }
-      await this.save();
-    }
+    await mkdir(dirname(this.path), { recursive: true });
+    this.db = new Database(this.path);
+    this.db.exec("PRAGMA journal_mode = WAL");
+    this.db.exec("PRAGMA foreign_keys = ON");
+    this.migrate();
+    this.ensureStartedAt();
+  }
+
+  close(): void {
+    this.db?.close();
+    this.db = undefined;
   }
 
   snapshot(): DaemonState {
-    return structuredClone(this.state);
+    const db = this.requireDb();
+    const startedAt = this.getMetadata("started_at");
+    const jobs = db
+      .query("select * from jobs order by updated_at desc, created_at desc limit 200")
+      .all()
+      .map((row) => jobFromRow(row as JobRow));
+    const events = db
+      .query("select * from job_events order by created_at desc, id desc limit 500")
+      .all()
+      .map((row) => eventFromRow(row as EventRow));
+
+    return { startedAt, jobs, events };
+  }
+
+  syncRepoMappings(repos: RepoMapping[]): void {
+    const db = this.requireDb();
+    const now = new Date().toISOString();
+    const upsert = db.query(
+      `insert into repo_mappings (
+        github, local_path, default_base, linear_teams_json, test_commands_json, created_at, updated_at
+      ) values (?, ?, ?, ?, ?, ?, ?)
+      on conflict(github) do update set
+        local_path = excluded.local_path,
+        default_base = excluded.default_base,
+        linear_teams_json = excluded.linear_teams_json,
+        test_commands_json = excluded.test_commands_json,
+        updated_at = excluded.updated_at`,
+    );
+
+    db.transaction(() => {
+      for (const repo of repos) {
+        upsert.run(
+          repo.github,
+          repo.localPath,
+          repo.defaultBase,
+          JSON.stringify(repo.linearTeams),
+          JSON.stringify(repo.testCommands ?? []),
+          now,
+          now,
+        );
+      }
+    })();
   }
 
   async createJob(job: RoutedJob): Promise<JobRecord> {
+    const db = this.requireDb();
     const now = new Date().toISOString();
     const record: JobRecord = {
       id: job.id,
@@ -45,61 +114,246 @@ export class StateStore {
       lastMessage: "Queued",
     };
 
-    this.state.jobs = [record, ...this.state.jobs.filter((existing) => existing.id !== record.id)].slice(0, 200);
-    await this.addEvent("info", `Queued job for ${record.repo}`, record.id, false);
-    await this.save();
+    db.transaction(() => {
+      db.query(
+        `insert into sessions (
+          id, issue_id, issue_identifier, issue_title, repo, status, created_at, updated_at
+        ) values (?, ?, ?, ?, ?, ?, ?, ?)
+        on conflict(id) do update set
+          issue_id = excluded.issue_id,
+          issue_identifier = excluded.issue_identifier,
+          issue_title = excluded.issue_title,
+          repo = excluded.repo,
+          status = excluded.status,
+          updated_at = excluded.updated_at`,
+      ).run(
+        job.sessionId,
+        job.issue.id ?? null,
+        job.issue.identifier ?? null,
+        job.issue.title ?? null,
+        job.repo.github,
+        "active",
+        now,
+        now,
+      );
+      db.query(
+        `insert into jobs (
+          id, session_id, status, repo, issue_identifier, issue_title, policy_rule,
+          policy_decision, created_at, updated_at, last_message
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        on conflict(id) do update set
+          status = excluded.status,
+          repo = excluded.repo,
+          issue_identifier = excluded.issue_identifier,
+          issue_title = excluded.issue_title,
+          policy_rule = excluded.policy_rule,
+          policy_decision = excluded.policy_decision,
+          updated_at = excluded.updated_at,
+          last_message = excluded.last_message`,
+      ).run(
+        record.id,
+        record.sessionId,
+        record.status,
+        record.repo,
+        record.issueIdentifier ?? null,
+        record.issueTitle ?? null,
+        record.policyRule,
+        record.policyDecision,
+        record.createdAt,
+        record.updatedAt,
+        record.lastMessage,
+      );
+      this.insertEvent("info", `Queued job for ${record.repo}`, record.id, now);
+    })();
+
     return record;
   }
 
   async updateJob(id: string, status: JobStatus, lastMessage: string): Promise<void> {
-    const job = this.state.jobs.find((record) => record.id === id);
-    if (!job) {
+    const db = this.requireDb();
+    const now = new Date().toISOString();
+    const result = db
+      .query("update jobs set status = ?, last_message = ?, updated_at = ? where id = ?")
+      .run(status, lastMessage, now, id);
+
+    if (result.changes === 0) {
       return;
     }
 
-    job.status = status;
-    job.lastMessage = lastMessage;
-    job.updatedAt = new Date().toISOString();
-    await this.addEvent(status === "failed" ? "error" : "info", lastMessage, id, false);
-    await this.save();
+    db.query(
+      `update sessions
+       set status = case
+         when ? in ('completed', 'failed', 'denied') then ?
+         else status
+       end,
+       updated_at = ?
+       where id = (select session_id from jobs where id = ?)`,
+    ).run(status, status, now, id);
+    await this.addEvent(status === "failed" ? "error" : "info", lastMessage, id);
   }
 
   async setJobWorktree(id: string, worktree: WorktreeInfo): Promise<void> {
-    const job = this.state.jobs.find((record) => record.id === id);
-    if (!job) {
+    const db = this.requireDb();
+    const now = new Date().toISOString();
+    const result = db
+      .query("update jobs set branch_name = ?, worktree_path = ?, updated_at = ? where id = ?")
+      .run(worktree.branchName, worktree.path, now, id);
+
+    if (result.changes === 0) {
       return;
     }
 
-    job.branchName = worktree.branchName;
-    job.worktreePath = worktree.path;
-    job.updatedAt = new Date().toISOString();
-    await this.addEvent("info", `Prepared worktree ${worktree.branchName}`, id, false);
-    await this.save();
+    await this.addEvent("info", `Prepared worktree ${worktree.branchName}`, id);
   }
 
-  async addEvent(level: DaemonEvent["level"], message: string, jobId?: string, save = true): Promise<void> {
-    this.state.events = [
-      {
-        id: randomUUID(),
-        jobId,
-        level,
-        message,
-        createdAt: new Date().toISOString(),
-      },
-      ...this.state.events,
-    ].slice(0, 500);
+  async addEvent(level: DaemonEvent["level"], message: string, jobId?: string): Promise<void> {
+    this.insertEvent(level, message, jobId, new Date().toISOString());
+  }
 
-    if (save) {
-      await this.save();
+  private migrate(): void {
+    const db = this.requireDb();
+    db.exec(`
+      create table if not exists daemon_metadata (
+        key text primary key,
+        value text not null
+      );
+
+      create table if not exists repo_mappings (
+        id integer primary key autoincrement,
+        github text not null unique,
+        local_path text not null,
+        default_base text not null,
+        linear_teams_json text not null,
+        test_commands_json text not null,
+        created_at text not null,
+        updated_at text not null
+      );
+
+      create table if not exists sessions (
+        id text primary key,
+        issue_id text,
+        issue_identifier text,
+        issue_title text,
+        repo text not null,
+        codex_thread_id text,
+        status text not null,
+        created_at text not null,
+        updated_at text not null
+      );
+
+      create table if not exists jobs (
+        id text primary key,
+        session_id text not null references sessions(id) on delete cascade,
+        status text not null,
+        repo text not null,
+        branch_name text,
+        worktree_path text,
+        issue_identifier text,
+        issue_title text,
+        policy_rule text not null,
+        policy_decision text not null,
+        created_at text not null,
+        updated_at text not null,
+        last_message text not null
+      );
+
+      create table if not exists job_events (
+        id text primary key,
+        job_id text references jobs(id) on delete cascade,
+        level text not null,
+        message text not null,
+        created_at text not null
+      );
+
+      create table if not exists approvals (
+        id text primary key,
+        job_id text references jobs(id) on delete cascade,
+        requested_action text not null,
+        status text not null,
+        approver text,
+        linear_comment_id text,
+        created_at text not null,
+        updated_at text not null
+      );
+
+      create table if not exists pull_requests (
+        id text primary key,
+        job_id text references jobs(id) on delete cascade,
+        github_repo text not null,
+        branch_name text not null,
+        pr_number integer,
+        url text,
+        status text not null,
+        created_at text not null,
+        updated_at text not null
+      );
+
+      create index if not exists idx_jobs_updated_at on jobs(updated_at);
+      create index if not exists idx_job_events_created_at on job_events(created_at);
+      create index if not exists idx_job_events_job_id on job_events(job_id);
+    `);
+  }
+
+  private ensureStartedAt(): void {
+    if (this.getMetadata("started_at", false)) {
+      return;
     }
+
+    this.requireDb()
+      .query("insert into daemon_metadata (key, value) values (?, ?)")
+      .run("started_at", new Date().toISOString());
   }
 
-  private async save(): Promise<void> {
-    await mkdir(dirname(this.path), { recursive: true });
-    await writeFile(this.path, `${JSON.stringify(this.state, null, 2)}\n`);
+  private getMetadata(key: string, required = true): string {
+    const row = this.requireDb().query("select value from daemon_metadata where key = ?").get(key) as MetadataRow | null;
+    if (!row && required) {
+      throw new Error(`Missing daemon metadata ${key}`);
+    }
+    return row?.value ?? "";
+  }
+
+  private insertEvent(level: DaemonEvent["level"], message: string, jobId: string | undefined, createdAt: string): void {
+    this.requireDb()
+      .query("insert into job_events (id, job_id, level, message, created_at) values (?, ?, ?, ?, ?)")
+      .run(randomUUID(), jobId ?? null, level, message, createdAt);
+  }
+
+  private requireDb(): Database {
+    if (!this.db) {
+      throw new Error("State store is not loaded");
+    }
+    return this.db;
   }
 }
 
 export function createJobId(sessionId: string): string {
   return `${sessionId}-${randomUUID().slice(0, 8)}`;
+}
+
+function jobFromRow(row: JobRow): JobRecord {
+  return {
+    id: row.id,
+    sessionId: row.session_id,
+    status: row.status,
+    repo: row.repo,
+    branchName: row.branch_name ?? undefined,
+    worktreePath: row.worktree_path ?? undefined,
+    issueIdentifier: row.issue_identifier ?? undefined,
+    issueTitle: row.issue_title ?? undefined,
+    policyRule: row.policy_rule,
+    policyDecision: row.policy_decision,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    lastMessage: row.last_message,
+  };
+}
+
+function eventFromRow(row: EventRow): DaemonEvent {
+  return {
+    id: row.id,
+    jobId: row.job_id ?? undefined,
+    level: row.level,
+    message: row.message,
+    createdAt: row.created_at,
+  };
 }
