@@ -242,6 +242,34 @@ describe("Linear webhook handling", () => {
     });
   });
 
+  test("redacts likely secrets before posting agent activities", async () => {
+    const calls: unknown[] = [];
+    const restore = mockFetch(calls);
+    process.env.LINEAR_API_KEY = "lin_test";
+
+    try {
+      await postLinearActivity(config, "sess_1", {
+        type: "error",
+        body: "Command failed with access_token=lin_abcdefghijklmnopqrstuvwxyz and Bearer abcdefghijklmnop",
+      });
+    } finally {
+      restore();
+      delete process.env.LINEAR_API_KEY;
+    }
+
+    expect(calls[0]).toMatchObject({
+      body: {
+        variables: {
+          input: {
+            content: {
+              body: "Command failed with access_token=[REDACTED] and Bearer [REDACTED]",
+            },
+          },
+        },
+      },
+    });
+  });
+
   test("updates agent session plans and external URLs", async () => {
     const calls: unknown[] = [];
     const restore = mockFetch(calls);

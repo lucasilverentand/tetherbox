@@ -73,7 +73,7 @@ export class JobQueue {
     }
 
     running.controller.abort();
-    await this.options.state.addEvent("warn", "Cancellation requested", jobId);
+    await this.options.state.addEvent("warn", "Cancellation requested", jobId, "queue");
     return true;
   }
 

@@ -40,11 +40,15 @@ Store config files and SQLite state with permissions appropriate for the service
 
 Do not commit local config files with real secrets. Keep `examples/config.json` as shape-only documentation.
 
-## Redaction Limits
+## Redaction And Audit Limits
 
-Tetherbox does not promise full secret redaction.
+Tetherbox redacts likely secrets before posting Linear activity/session updates, writing daemon audit events, or returning status snapshots used by the TUI.
 
-It avoids exposing Codex App Server directly and verifies webhook signatures, but job prompts and events may contain user-provided text, file paths, command names, error messages, and Linear metadata. Treat `/api/status`, logs, and SQLite state as sensitive operational data.
+The redactor targets common secret shapes: sensitive key names such as `access_token`, `refresh_token`, `api_key`, `client_secret`, `password`, and `private_key`; bearer tokens; common service token prefixes; and URL credentials.
+
+This is a safety net, not a guarantee. User-provided text, tool output, file contents, model output, and unusual token formats may still contain sensitive data. Treat `/api/status`, logs, and SQLite state as sensitive operational data.
+
+Local audit events persist a source, timestamp, job ID, severity, and redacted message. The source is a coarse subsystem label such as `queue`, `job`, `worktree`, `codex`, `linear`, or `daemon`.
 
 ## Approval Boundaries
 

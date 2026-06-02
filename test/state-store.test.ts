@@ -48,6 +48,25 @@ describe("StateStore", () => {
     expect(snapshot.jobs[0]?.lastMessage).toBe("Started");
     expect(snapshot.events.length).toBe(2);
     expect(snapshot.events.map((event) => event.message)).toContain("Started");
+    expect(snapshot.events.every((event) => event.source)).toBe(true);
+  });
+
+  test("redacts persisted audit events and stores their source", async () => {
+    const path = await statePath();
+    const store = new StateStore(path);
+    await store.load();
+    await store.createJob(jobFixture());
+    await store.addEvent("warn", "Linear returned access_token=lin_abcdefghijklmnopqrstuvwxyz", "job-1", "linear");
+
+    const event = store.snapshot().events.find((candidate) => candidate.source === "linear");
+    store.close();
+
+    expect(event).toMatchObject({
+      source: "linear",
+      level: "warn",
+      message: "Linear returned access_token=[REDACTED]",
+      jobId: "job-1",
+    });
   });
 
   test("persists job worktree details", async () => {
@@ -249,9 +268,10 @@ describe("StateStore", () => {
     const path = await statePath();
     const store = new StateStore(path);
     await store.load();
-    await store.createJob(jobFixture());
+    await store.createJob({ ...jobFixture(), prompt: "Fix it with access_token=lin_abcdefghijklmnopqrstuvwxyz" });
 
     const snapshot = store.snapshot();
+    const internalJob = store.getJob("job-1");
     store.close();
 
     expect(typeof snapshot.startedAt).toBe("string");
@@ -262,7 +282,9 @@ describe("StateStore", () => {
       sessionId: "session-1",
       repo: "lucasilverentand/example",
       status: "queued",
+      prompt: "Fix it with access_token=[REDACTED]",
     });
+    expect(internalJob?.prompt).toBe("Fix it with access_token=lin_abcdefghijklmnopqrstuvwxyz");
   });
 });
 

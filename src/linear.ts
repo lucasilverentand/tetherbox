@@ -1,4 +1,5 @@
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
+import { redactValue } from "./redaction";
 import type { BridgeConfig, LinearAgentSessionEvent, LinearIssueContext } from "./types";
 import type { LinearInstallationRecord } from "./state-store";
 
@@ -187,7 +188,7 @@ export async function postLinearActivity(
   tokenStore?: LinearTokenStore,
 ): Promise<void> {
   const token = await getLinearAccessToken(config, tokenStore);
-  const input = linearActivityInput(agentSessionId, activity);
+  const input = redactValue(linearActivityInput(agentSessionId, activity));
   if (!token) {
     logLinearFallback("agentActivityCreate", input);
     return;
@@ -220,8 +221,9 @@ export async function updateLinearAgentSession(
   tokenStore?: LinearTokenStore,
 ): Promise<void> {
   const token = await getLinearAccessToken(config, tokenStore);
+  const redactedInput = redactValue(input);
   if (!token) {
-    logLinearFallback("agentSessionUpdate", { agentSessionId, input });
+    logLinearFallback("agentSessionUpdate", { agentSessionId, input: redactedInput });
     return;
   }
 
@@ -233,7 +235,7 @@ export async function updateLinearAgentSession(
     }`,
     variables: {
       id: agentSessionId,
-      input,
+      input: redactedInput,
     },
   });
 }
@@ -417,7 +419,7 @@ async function linearGraphql<T>(
 }
 
 function logLinearFallback(operation: string, payload: unknown): void {
-  console.log(JSON.stringify({ source: "linear.graphql.fallback", operation, payload }));
+  console.log(JSON.stringify({ source: "linear.graphql.fallback", operation, payload: redactValue(payload) }));
 }
 
 function linearActivityInput(agentSessionId: string, activity: LinearActivityContent | LinearActivityInput): LinearActivityInput & {
