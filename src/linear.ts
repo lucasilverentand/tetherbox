@@ -26,6 +26,7 @@ export interface LinearRepositorySuggestion {
 }
 
 export type LinearApprovalDecision = "approve" | "deny";
+export type LinearAgentSessionAction = "created" | "prompted";
 
 const LINEAR_GRAPHQL_URL = "https://api.linear.app/graphql";
 const LINEAR_AUTHORIZE_URL = "https://linear.app/oauth/authorize";
@@ -67,8 +68,19 @@ export function verifyLinearSignature(rawBody: string, signature: string | null,
 }
 
 export function parseLinearAgentEvent(rawBody: string): LinearAgentSessionEvent {
-  const parsed = JSON.parse(rawBody) as LinearAgentSessionEvent;
-  return parsed;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawBody);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "invalid JSON";
+    throw new Error(`Invalid Linear webhook JSON: ${message}`);
+  }
+
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("Linear webhook payload must be a JSON object");
+  }
+
+  return parsed as LinearAgentSessionEvent;
 }
 
 export function getIssueContext(event: LinearAgentSessionEvent): LinearIssueContext {
@@ -86,6 +98,10 @@ export function getSessionId(event: LinearAgentSessionEvent): string {
     throw new Error("Linear event did not include agentSession.id");
   }
   return id;
+}
+
+export function getAgentSessionAction(event: LinearAgentSessionEvent): LinearAgentSessionAction | undefined {
+  return event.action === "created" || event.action === "prompted" ? event.action : undefined;
 }
 
 export function getPrompt(event: LinearAgentSessionEvent): string {

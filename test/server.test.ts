@@ -20,6 +20,7 @@ describe("server webhook handling", () => {
       webhookSecret: "secret",
     });
     const body = JSON.stringify({
+      action: "created",
       agentSession: {
         id: "sess_1",
         promptContext: "Fix this",
@@ -121,6 +122,7 @@ describe("server webhook handling", () => {
       webhookSecret: "secret",
     });
     const body = JSON.stringify({
+      action: "prompted",
       agentSession: { id: "sess_1" },
       agentActivity: { body: "approve" },
     });
@@ -152,6 +154,101 @@ describe("server webhook handling", () => {
       fetchMock.restore();
       state.close();
       delete process.env.LINEAR_API_KEY;
+    }
+  });
+
+  test("ignores unsupported Linear webhook actions without queueing jobs", async () => {
+    const state = await loadedState();
+    const queue = new FakeQueue();
+    const handler = createRequestHandler({
+      config,
+      state,
+      queue,
+      webhookSecret: "secret",
+    });
+    const body = JSON.stringify({
+      action: "permissionChanged",
+      agentSession: { id: "sess_ignored" },
+    });
+
+    try {
+      const response = await handler(
+        new Request("http://127.0.0.1:8787/webhooks/linear", {
+          method: "POST",
+          headers: { "Linear-Signature": signature(body, "secret") },
+          body,
+        }),
+      );
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        ok: true,
+        accepted: false,
+        reason: "unsupported_action",
+      });
+      expect(queue.jobs).toHaveLength(0);
+      expect(state.snapshot().jobs).toHaveLength(0);
+      expect(state.snapshot().events[0]?.message).toContain("unsupported Linear AgentSessionEvent action");
+    } finally {
+      state.close();
+    }
+  });
+
+  test("rejects malformed Linear webhook JSON without queueing jobs", async () => {
+    const state = await loadedState();
+    const queue = new FakeQueue();
+    const handler = createRequestHandler({
+      config,
+      state,
+      queue,
+      webhookSecret: "secret",
+    });
+    const body = "{not-json";
+
+    try {
+      const response = await handler(
+        new Request("http://127.0.0.1:8787/webhooks/linear", {
+          method: "POST",
+          headers: { "Linear-Signature": signature(body, "secret") },
+          body,
+        }),
+      );
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({
+        error: expect.stringContaining("Invalid Linear webhook JSON"),
+      });
+      expect(queue.jobs).toHaveLength(0);
+      expect(state.snapshot().jobs).toHaveLength(0);
+    } finally {
+      state.close();
+    }
+  });
+
+  test("rejects Linear webhooks with invalid signatures before parsing", async () => {
+    const state = await loadedState();
+    const queue = new FakeQueue();
+    const handler = createRequestHandler({
+      config,
+      state,
+      queue,
+      webhookSecret: "secret",
+    });
+
+    try {
+      const response = await handler(
+        new Request("http://127.0.0.1:8787/webhooks/linear", {
+          method: "POST",
+          headers: { "Linear-Signature": "bad" },
+          body: "{not-json",
+        }),
+      );
+
+      expect(response.status).toBe(401);
+      expect(queue.jobs).toHaveLength(0);
+      expect(state.snapshot().jobs).toHaveLength(0);
+    } finally {
+      state.close();
     }
   });
 });

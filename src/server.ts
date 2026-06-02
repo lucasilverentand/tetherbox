@@ -2,6 +2,7 @@ import { loadConfig, getRequiredEnv } from "./config";
 import { assertSupportedCodexCli } from "./codex-version";
 import {
   buildLinearJobPrompt,
+  getAgentSessionAction,
   getIssueContext,
   getPrompt,
   getSessionId,
@@ -121,6 +122,17 @@ export function createRequestHandler(options: RequestHandlerOptions): (request: 
 
     try {
       const event = parseLinearAgentEvent(rawBody);
+      const action = getAgentSessionAction(event);
+      if (!action) {
+        const reason = `Ignored unsupported Linear AgentSessionEvent action: ${event.action ?? "missing"}`;
+        await state.addEvent("warn", reason);
+        return Response.json({
+          ok: true,
+          accepted: false,
+          reason: "unsupported_action",
+          action: event.action ?? null,
+        });
+      }
       const sessionId = getSessionId(event);
       const jobId = createJobId(sessionId);
       void intakeLinearWebhook({ config, state, queue, event, sessionId, jobId }).catch((error) => {
