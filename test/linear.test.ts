@@ -7,6 +7,7 @@ import {
   buildLinearJobPrompt,
   buildLinearOAuthAuthorizationUrl,
   completeLinearOAuthCallback,
+  getAgentSessionAction,
   getIssueContext,
   getPrompt,
   getSessionId,
@@ -33,6 +34,7 @@ describe("Linear webhook handling", () => {
   test("extracts session, prompt, and issue context", () => {
     const event = parseLinearAgentEvent(
       JSON.stringify({
+        action: "created",
         agentSession: {
           id: "sess_1",
           prompt: "Fix this in lucasilverentand/example",
@@ -51,9 +53,22 @@ describe("Linear webhook handling", () => {
     expect(getIssueContext(event).labels).toEqual(["docs"]);
   });
 
+  test("recognizes supported Agent Session webhook actions", () => {
+    expect(getAgentSessionAction(parseLinearAgentEvent(JSON.stringify({ action: "created" })))).toBe("created");
+    expect(getAgentSessionAction(parseLinearAgentEvent(JSON.stringify({ action: "prompted" })))).toBe("prompted");
+    expect(getAgentSessionAction(parseLinearAgentEvent(JSON.stringify({ action: "permissionChanged" })))).toBeUndefined();
+    expect(getAgentSessionAction(parseLinearAgentEvent(JSON.stringify({})))).toBeUndefined();
+  });
+
+  test("rejects malformed Linear webhook payloads", () => {
+    expect(() => parseLinearAgentEvent("{not-json")).toThrow("Invalid Linear webhook JSON");
+    expect(() => parseLinearAgentEvent("[]")).toThrow("Linear webhook payload must be a JSON object");
+  });
+
   test("prefers promptContext and prompted activity bodies", () => {
     const created = parseLinearAgentEvent(
       JSON.stringify({
+        action: "created",
         agentSession: {
           id: "sess_1",
           promptContext: "<issue><title>Fix checkout</title></issue>",
@@ -63,6 +78,7 @@ describe("Linear webhook handling", () => {
     );
     const prompted = parseLinearAgentEvent(
       JSON.stringify({
+        action: "prompted",
         agentSession: { id: "sess_1", promptContext: "" },
         agentActivity: { body: "Please also add tests" },
       }),
