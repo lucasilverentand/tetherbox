@@ -17,6 +17,7 @@
   "linear": {
     "webhookSecretEnv": "LINEAR_WEBHOOK_SECRET",
     "webhookMaxAgeMs": 60000,
+    "apiTimeoutMs": 8000,
     "apiKeyEnv": "LINEAR_API_KEY",
     "repositorySuggestionMinConfidence": 0.2,
     "reviewStateName": "In Review",

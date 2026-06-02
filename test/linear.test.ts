@@ -1,5 +1,5 @@
 import { createHmac } from "node:crypto";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
@@ -27,6 +27,7 @@ import {
   updateLinearAgentSession,
   verifyLinearSignature,
 } from "../src/linear";
+import { loadConfig } from "../src/config";
 import { StateStore } from "../src/state-store";
 import type { BridgeConfig } from "../src/types";
 
@@ -987,6 +988,47 @@ describe("Linear webhook handling", () => {
       store.close();
       delete process.env.LINEAR_CLIENT_ID;
       delete process.env.LINEAR_CLIENT_SECRET;
+    }
+  });
+
+  test("defaults Linear GraphQL API timeout below the first-response window", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "linear-config-"));
+    const configPath = join(dir, "config.json");
+    await writeFile(configPath, JSON.stringify({
+      server: { host: "127.0.0.1", port: 8787 },
+      linear: { webhookSecretEnv: "LINEAR_WEBHOOK_SECRET" },
+      codex: { bin: "codex", sandbox: "workspace-write" },
+      repos: [{ linearTeams: ["OSS"], github: "lucasilverentand/tetherbox", localPath: "/tmp/tetherbox", defaultBase: "main" }],
+    }));
+
+    const loaded = await loadConfig(configPath);
+
+    expect(loaded.linear.apiTimeoutMs).toBe(8_000);
+  });
+
+  test("times out stalled Linear GraphQL calls", async () => {
+    process.env.LINEAR_API_KEY = "lin_test";
+    const calls: Array<{ signal?: AbortSignal }> = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = ((_url: string | URL | Request, init?: RequestInit) => {
+      calls.push({ signal: init?.signal ?? undefined });
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+      });
+    }) as typeof fetch;
+
+    try {
+      await expect(
+        postLinearActivity(
+          { ...config, linear: { ...config.linear, apiTimeoutMs: 1 } },
+          "sess_1",
+          { type: "thought", body: "Working" },
+        ),
+      ).rejects.toThrow("Linear GraphQL request timed out after 1ms");
+      expect(calls[0]?.signal?.aborted).toBe(true);
+    } finally {
+      globalThis.fetch = original;
+      delete process.env.LINEAR_API_KEY;
     }
   });
 });

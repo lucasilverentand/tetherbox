@@ -25,6 +25,7 @@ Edit `config.local.json`:
 - Set `state.path` to a durable local path.
 - Set `linear.webhookSecretEnv`, `linear.apiKeyEnv`, `linear.oauthClientIdEnv`, and `linear.oauthClientSecretEnv`.
 - Keep the default `linear.webhookMaxAgeMs` unless your tunnel or proxy consistently delays Linear webhooks beyond 60 seconds.
+- Keep `linear.apiTimeoutMs` below Linear's first-response window; the default is 8000 ms.
 - Set `linear.reviewStateName` if your team's pull-request review column is not named `In Review`.
 - Add one `repos` entry for each local checkout.
 - Add policy rules under `policies`.
