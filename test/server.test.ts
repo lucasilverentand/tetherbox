@@ -1495,6 +1495,15 @@ describe("server webhook handling", () => {
       expect(await response.json()).toMatchObject({ ok: true, stop: true });
       await waitFor(() => state.getJob("tetherbox-sess_stop")?.status === "canceled");
       await waitFor(() => fetchMock.pending.length === 1);
+      expect(linearSessionUpdateInputs(fetchMock.calls, "sess_stop")[0]).toMatchObject({
+        plan: [
+          { content: "Route Linear context to a local repository", status: "completed" },
+          { content: "Run Codex locally", status: "canceled" },
+          { content: "Report the result back to Linear", status: "completed" },
+        ],
+      });
+      fetchMock.resolveNext({ data: { agentSessionUpdate: { success: true } } });
+      await waitFor(() => fetchMock.pending.length === 1);
       expect(linearActivityInputs(fetchMock.calls)[0]).toMatchObject({
         agentSessionId: "sess_stop",
         content: {
@@ -1542,6 +1551,15 @@ describe("server webhook handling", () => {
 
       expect(response.status).toBe(200);
       await waitFor(() => state.getJob("tetherbox-sess_wait")?.status === "canceled");
+      await waitFor(() => fetchMock.pending.length === 1);
+      expect(linearSessionUpdateInputs(fetchMock.calls, "sess_wait")[0]).toMatchObject({
+        plan: [
+          { content: "Route Linear context to a local repository", status: "completed" },
+          { content: "Run Codex locally", status: "canceled" },
+          { content: "Report the result back to Linear", status: "completed" },
+        ],
+      });
+      fetchMock.resolveNext({ data: { agentSessionUpdate: { success: true } } });
       await waitFor(() => fetchMock.pending.length === 1);
       expect(linearActivityInputs(fetchMock.calls)[0]).toMatchObject({
         agentSessionId: "sess_wait",
@@ -1591,6 +1609,7 @@ describe("server webhook handling", () => {
       await waitFor(() => state.getJob("tetherbox-sess_stop")?.status === "canceled");
       await sleep(10);
       expect(fetchMock.pending).toHaveLength(0);
+      expect(linearSessionUpdateInputs(fetchMock.calls, "sess_stop")).toHaveLength(0);
       expect(linearActivityInputs(fetchMock.calls)).toHaveLength(0);
       expect(queue.jobs).toHaveLength(0);
     } finally {
