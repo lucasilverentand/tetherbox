@@ -106,6 +106,66 @@ describe("runJob", () => {
       jobId: "job-2",
     });
   });
+
+  test("adds pull request URLs to the Linear agent session", async () => {
+    process.env.LINEAR_API_KEY = "lin_test";
+    const calls: unknown[] = [];
+    const restore = mockFetch(calls);
+    const state = new StateStore(await statePath());
+    await state.load();
+    await state.createJob(autoJob);
+    const client = new FakeCodexClient();
+
+    try {
+      const result = await runJob(
+        {
+          ...config,
+          server: { ...config.server, publicUrl: "https://bridge.example" },
+          linear: { ...config.linear, apiKeyEnv: "LINEAR_API_KEY" },
+        },
+        autoJob,
+        state,
+        {
+          createClient: () => client,
+          prepareWorktree: async () => worktree,
+          finalizeRun: async () => ({
+            status: "created",
+            url: "https://github.com/lucasilverentand/example/pull/12",
+            number: 12,
+          }),
+          watchChecks: async () => ({
+            status: "no_checks",
+            summary: "No GitHub checks were reported for the pull request.",
+            output: "no checks reported",
+          }),
+        },
+      );
+
+      expect(result).toEqual({
+        status: "completed",
+        message: "Codex turn completed",
+      });
+      expect(calls).toContainEqual(
+        expect.objectContaining({
+          body: expect.objectContaining({
+            variables: expect.objectContaining({
+              id: "session-1",
+              input: {
+                externalUrls: [
+                  { label: "Tetherbox job", url: "https://bridge.example/api/status#job-2" },
+                  { label: "GitHub pull request", url: "https://github.com/lucasilverentand/example/pull/12" },
+                ],
+              },
+            }),
+          }),
+        }),
+      );
+    } finally {
+      restore();
+      state.close();
+      delete process.env.LINEAR_API_KEY;
+    }
+  });
 });
 
 async function statePath(): Promise<string> {
@@ -184,4 +244,22 @@ class FakeCodexClient {
   stop(): void {
     this.stopped = true;
   }
+}
+
+function mockFetch(calls: unknown[]): () => void {
+  const original = globalThis.fetch;
+  globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+    calls.push({
+      headers: init?.headers,
+      body: JSON.parse(String(init?.body)),
+    });
+    return new Response(JSON.stringify({ data: { ok: true } }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  }) as typeof fetch;
+
+  return () => {
+    globalThis.fetch = original;
+  };
 }

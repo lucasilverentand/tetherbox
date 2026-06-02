@@ -16,7 +16,9 @@ import {
   postLinearActivity,
   parseApprovalDecision,
   isStopSignal,
+  listLinearAgentSessionActivities,
   statusExternalUrl,
+  syncLinearIssueForAgentSession,
   updateLinearAgentSession,
   verifyLinearSignature,
 } from "../src/linear";
@@ -208,6 +210,130 @@ describe("Linear webhook handling", () => {
     expect(prompt).toContain("Please also cover previous comments");
   });
 
+  test("includes frozen Agent Session activity history in prompts", () => {
+    const event = parseLinearAgentEvent(
+      JSON.stringify({
+        action: "prompted",
+        agentSession: {
+          id: "sess_1",
+          issue: {
+            identifier: "OSS-253",
+            title: "Preserve Linear issue context",
+            labels: [],
+          },
+        },
+        agentActivity: { body: "Please include the current thread" },
+      }),
+    );
+
+    const prompt = buildLinearJobPrompt(event, [
+      {
+        type: "prompt",
+        updatedAt: "2026-06-02T12:00:00.000Z",
+        body: "Start by fixing the webhook context.",
+      },
+      {
+        type: "action",
+        updatedAt: "2026-06-02T12:01:00.000Z",
+        action: "Opened pull request",
+        parameter: "lucasilverentand/example",
+        result: "https://github.com/lucasilverentand/example/pull/12",
+      },
+    ]);
+
+    expect(prompt).toContain("## Agent Activity History");
+    expect(prompt).toContain("prompt: Start by fixing the webhook context.");
+    expect(prompt).toContain(
+      "action: Opened pull request (lucasilverentand/example) => https://github.com/lucasilverentand/example/pull/12",
+    );
+    expect(prompt).toContain("Please include the current thread");
+  });
+
+  test("lists Linear Agent Session activities through GraphQL", async () => {
+    const calls: unknown[] = [];
+    const restore = mockFetchSequence(calls, [
+      new Response(
+        JSON.stringify({
+          data: {
+            agentSession: {
+              activities: {
+                edges: [
+                  {
+                    node: {
+                      updatedAt: "2026-06-02T12:02:00.000Z",
+                      content: {
+                        __typename: "AgentActivityResponseContent",
+                        body: "Done.",
+                      },
+                    },
+                  },
+                  {
+                    node: {
+                      updatedAt: "2026-06-02T12:01:00.000Z",
+                      content: {
+                        __typename: "AgentActivityPromptContent",
+                        body: "Please add tests.",
+                      },
+                    },
+                  },
+                  {
+                    node: {
+                      updatedAt: "2026-06-02T12:01:30.000Z",
+                      content: {
+                        __typename: "AgentActivityActionContent",
+                        action: "Validated",
+                        parameter: "bun run check",
+                        result: "passed",
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+          },
+        }),
+        { status: 200 },
+      ),
+    ]);
+    process.env.LINEAR_API_KEY = "lin_test";
+
+    try {
+      const activities = await listLinearAgentSessionActivities(config, "sess_1");
+
+      expect(activities).toEqual([
+        {
+          type: "prompt",
+          updatedAt: "2026-06-02T12:01:00.000Z",
+          body: "Please add tests.",
+        },
+        {
+          type: "action",
+          updatedAt: "2026-06-02T12:01:30.000Z",
+          action: "Validated",
+          parameter: "bun run check",
+          result: "passed",
+        },
+        {
+          type: "response",
+          updatedAt: "2026-06-02T12:02:00.000Z",
+          body: "Done.",
+        },
+      ]);
+      expect(calls[0]).toMatchObject({
+        headers: { Authorization: "Bearer lin_test" },
+        body: {
+          variables: {
+            id: "sess_1",
+            first: 25,
+          },
+        },
+      });
+    } finally {
+      restore();
+      delete process.env.LINEAR_API_KEY;
+    }
+  });
+
   test("posts agent activities through Linear GraphQL", async () => {
     const calls: unknown[] = [];
     const restore = mockFetch(calls);
@@ -302,6 +428,122 @@ describe("Linear webhook handling", () => {
   test("builds public status URLs when configured", () => {
     expect(statusExternalUrl(config, "job/1")?.url).toBe("https://bridge.example/api/status#job%2F1");
     expect(statusExternalUrl({ ...config, server: { host: "127.0.0.1", port: 8787 } }, "job/1")).toBeUndefined();
+  });
+
+  test("moves delegated issues to the first started state and sets the app delegate", async () => {
+    const calls: unknown[] = [];
+    const restore = mockFetchSequence(calls, [
+      new Response(
+        JSON.stringify({
+          data: {
+            issue: {
+              id: "issue-uuid",
+              identifier: "OSS-1",
+              state: { id: "state-backlog", name: "Backlog", type: "backlog" },
+              team: { id: "team-1" },
+              delegate: null,
+            },
+          },
+        }),
+        { status: 200 },
+      ),
+      new Response(
+        JSON.stringify({
+          data: {
+            team: {
+              states: {
+                nodes: [
+                  { id: "state-later", name: "Reviewing", position: 2 },
+                  { id: "state-start", name: "In Progress", position: 1 },
+                ],
+              },
+            },
+          },
+        }),
+        { status: 200 },
+      ),
+      new Response(JSON.stringify({ data: { issueUpdate: { success: true, issue: { id: "issue-uuid" } } } }), {
+        status: 200,
+      }),
+    ]);
+    const store = await loadedState();
+    store.saveLinearInstallation({
+      workspaceId: "default",
+      appUserId: "app-user-1",
+      accessToken: "access-1",
+    });
+
+    try {
+      const result = await syncLinearIssueForAgentSession(
+        { ...config, linear: { webhookSecretEnv: "LINEAR_WEBHOOK_SECRET" } },
+        { id: "issue-uuid", identifier: "OSS-1", labels: [] },
+        store,
+      );
+
+      expect(result).toEqual({
+        issueId: "OSS-1",
+        movedToState: "In Progress",
+        delegateSet: true,
+      });
+      expect(calls[2]).toMatchObject({
+        headers: { Authorization: "Bearer access-1" },
+        body: {
+          variables: {
+            id: "issue-uuid",
+            input: {
+              stateId: "state-start",
+              delegateId: "app-user-1",
+            },
+          },
+        },
+      });
+    } finally {
+      restore();
+      store.close();
+    }
+  });
+
+  test("skips issue lifecycle updates when status and delegate are already current", async () => {
+    const calls: unknown[] = [];
+    const restore = mockFetchSequence(calls, [
+      new Response(
+        JSON.stringify({
+          data: {
+            issue: {
+              id: "issue-uuid",
+              identifier: "OSS-1",
+              state: { id: "state-start", name: "In Progress", type: "started" },
+              team: { id: "team-1" },
+              delegate: { id: "app-user-1" },
+            },
+          },
+        }),
+        { status: 200 },
+      ),
+    ]);
+    const store = await loadedState();
+    store.saveLinearInstallation({
+      workspaceId: "default",
+      appUserId: "app-user-1",
+      accessToken: "access-1",
+    });
+
+    try {
+      const result = await syncLinearIssueForAgentSession(
+        { ...config, linear: { webhookSecretEnv: "LINEAR_WEBHOOK_SECRET" } },
+        { id: "issue-uuid", identifier: "OSS-1", labels: [] },
+        store,
+      );
+
+      expect(result).toEqual({
+        issueId: "OSS-1",
+        skippedReason: "already_current",
+      });
+      expect(calls).toHaveLength(1);
+    } finally {
+      restore();
+      store.close();
+    }
   });
 
   test("builds Linear OAuth app actor authorization URLs", async () => {

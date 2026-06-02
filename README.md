@@ -52,7 +52,7 @@ Open the terminal UI in another shell:
 bun run src/index.ts tui --url http://127.0.0.1:8787
 ```
 
-Press `q` to quit.
+The TUI shows daemon health, queue state, job lists, job details, event lists, and event details. Use `tab` to switch jobs/events, `enter` for detail, `esc` to go back, `j`/`k` to move, `c` to cancel active work, `r` to retry eligible failures, `a` to approve waiting jobs, `d` to deny waiting jobs, and `q` to quit. Job action endpoints are allowed on loopback URLs; set `server.operatorTokenEnv` and pass `--operator-token` when controlling a non-loopback daemon URL.
 
 `serve` remains as an alias for `daemon`.
 
@@ -95,7 +95,8 @@ The bridge verifies `Linear-Signature` with HMAC-SHA256 over the raw request bod
 Set `LINEAR_API_KEY` (or the env var named by `linear.apiKeyEnv`) to the app actor token. When configured, Tetherbox emits Linear Agent Activities for thoughts, actions, responses, errors, and elicitation prompts, and updates the Agent Session plan/external URL. Without the token, those calls are logged locally as a dry-run fallback.
 
 When a webhook includes an issue ID, Tetherbox asks Linear's repository suggestion API to rank the configured candidate repos using the issue, session, guidance, and Linear context. Explicit repo mentions still win; low-confidence or unavailable suggestions fall back to the static team mapping. Tune the threshold with `linear.repositorySuggestionMinConfidence`.
-Follow-up `prompted` Agent Session events reuse the Codex thread ID stored for that Linear session, so user replies continue the same local Codex conversation.
+Follow-up `prompted` Agent Session events reuse the Codex thread ID stored for that Linear session, so user replies continue the same local Codex conversation. When Linear API access is configured, Tetherbox also reads the Agent Session activity history and adds those frozen prompt/action/response snapshots to the local Codex prompt.
+When Tetherbox opens or updates a GitHub pull request, it updates the Linear Agent Session `externalUrls` with the PR URL, plus the local Tetherbox job URL when `server.publicUrl` is configured.
 
 For OAuth app installation, set `LINEAR_CLIENT_ID` and `LINEAR_CLIENT_SECRET` using the env var names configured by `linear.oauthClientIdEnv` and `linear.oauthClientSecretEnv`, then open:
 
@@ -104,6 +105,7 @@ https://your-public-host.example.com/oauth/linear/start
 ```
 
 Tetherbox redirects to Linear with `actor=app`, validates the callback state, exchanges the authorization code, stores the app actor token in SQLite, and refreshes stored tokens before GraphQL calls when needed.
+When an installed app actor starts work on an issue, Tetherbox follows Linear agent best practices by moving the issue into the team's first started workflow state when needed and setting the stored app user as the issue delegate when no delegate is already set.
 
 ## Policy Config
 

@@ -68,6 +68,38 @@ describe("server webhook handling", () => {
       await waitFor(() => fetchMock.pending.length === 1);
       fetchMock.resolveNext({
         data: {
+          issue: {
+            id: "issue-1",
+            identifier: "OSS-1",
+            state: { id: "state-start", name: "In Progress", type: "started" },
+            team: { id: "team-1" },
+            delegate: null,
+          },
+        },
+      });
+      await waitFor(() => fetchMock.pending.length === 1);
+      fetchMock.resolveNext({
+        data: {
+          agentSession: {
+            activities: {
+              edges: [
+                {
+                  node: {
+                    updatedAt: "2026-06-02T12:00:00.000Z",
+                    content: {
+                      __typename: "AgentActivityPromptContent",
+                      body: "Earlier frozen prompt from Linear.",
+                    },
+                  },
+                },
+              ],
+            },
+          },
+        },
+      });
+      await waitFor(() => fetchMock.pending.length === 1);
+      fetchMock.resolveNext({
+        data: {
           issueRepositorySuggestions: {
             suggestions: [{ repositoryFullName: "lucasilverentand/api", confidence: 0.9 }],
           },
@@ -84,6 +116,7 @@ describe("server webhook handling", () => {
       expect(queue.jobs[0]?.prompt).toContain("The checkout flow is broken.");
       expect(queue.jobs[0]?.prompt).toContain("The latest repro is in staging.");
       expect(queue.jobs[0]?.prompt).toContain("Keep the fix minimal.");
+      expect(queue.jobs[0]?.prompt).toContain("Earlier frozen prompt from Linear.");
       expect(state.snapshot().jobs[0]?.id).toBe(queue.jobs[0]?.id);
     } finally {
       fetchMock.restore();
@@ -412,6 +445,28 @@ describe("server webhook handling", () => {
       await waitFor(() => fetchMock.pending.length === 1);
       fetchMock.resolveNext({ data: { agentActivityCreate: { success: true } } });
       await waitFor(() => fetchMock.pending.length === 1);
+      fetchMock.resolveNext({
+        data: {
+          issue: {
+            id: "issue-230",
+            identifier: "OSS-230",
+            state: { id: "state-start", name: "In Progress", type: "started" },
+            team: { id: "team-1" },
+            delegate: null,
+          },
+        },
+      });
+      await waitFor(() => fetchMock.pending.length === 1);
+      fetchMock.resolveNext({
+        data: {
+          agentSession: {
+            activities: {
+              edges: [],
+            },
+          },
+        },
+      });
+      await waitFor(() => fetchMock.pending.length === 1);
       fetchMock.resolveNext({ data: { agentSessionUpdate: { success: true } } });
       await waitFor(() => fetchMock.pending.length === 1);
       fetchMock.resolveNext({ data: { agentActivityCreate: { success: true } } });
@@ -488,6 +543,135 @@ describe("server webhook handling", () => {
       fetchMock.restore();
       state.close();
       delete process.env.LINEAR_API_KEY;
+    }
+  });
+
+  test("retries eligible jobs from the local operator API", async () => {
+    const state = await loadedState();
+    const queue = new FakeQueue(state);
+    const handler = createRequestHandler({ config, state, queue, webhookSecret: "secret" });
+    await state.createJob(jobFixture());
+    await state.updateJob("job-1", "failed", "Codex failed", {
+      retryEligible: true,
+      incrementRetryCount: true,
+      failureReason: "Codex failed",
+    });
+
+    try {
+      const response = await handler(new Request("http://127.0.0.1/api/jobs/job-1/retry", { method: "POST" }));
+      const body = await response.json();
+
+      expect(body).toEqual({ ok: true });
+      expect(queue.jobs).toHaveLength(1);
+      expect(queue.jobs[0]?.id).toBe("job-1");
+      expect(state.getJob("job-1")).toMatchObject({
+        status: "queued",
+        retryEligible: false,
+        lastMessage: "Retry queued from TUI",
+      });
+    } finally {
+      state.close();
+    }
+  });
+
+  test("approves and denies waiting jobs from the local operator API", async () => {
+    const state = await loadedState();
+    const queue = new FakeQueue(state);
+    const handler = createRequestHandler({ config, state, queue, webhookSecret: "secret" });
+    await state.createJob(jobFixture({ id: "job-approve", policy: { ruleName: "approval", decision: "require_approval", sandbox: "workspace-write" } }));
+    await state.updateJob("job-approve", "waiting_approval", "Approval required");
+    state.createApproval("job-approve", "Run local Codex");
+    await state.createJob(jobFixture({ id: "job-deny", sessionId: "sess_2", policy: { ruleName: "approval", decision: "require_approval", sandbox: "workspace-write" } }));
+    await state.updateJob("job-deny", "waiting_approval", "Approval required");
+    state.createApproval("job-deny", "Run local Codex");
+
+    try {
+      const approve = await handler(
+        new Request("http://127.0.0.1/api/jobs/job-approve/approve", { method: "POST" }),
+      );
+      const deny = await handler(new Request("http://127.0.0.1/api/jobs/job-deny/deny", { method: "POST" }));
+
+      expect(await approve.json()).toEqual({ ok: true });
+      expect(await deny.json()).toEqual({ ok: true });
+      expect(queue.jobs.find((job) => job.id === "job-approve")).toMatchObject({
+        policy: { decision: "allow_auto" },
+      });
+      expect(state.getJob("job-approve")?.status).toBe("queued");
+      expect(state.getJob("job-deny")?.status).toBe("canceled");
+    } finally {
+      state.close();
+    }
+  });
+
+  test("requires an operator token for non-loopback job actions", async () => {
+    const state = await loadedState();
+    const queue = new FakeQueue(state);
+    const handler = createRequestHandler({
+      config: {
+        ...config,
+        server: { ...config.server, host: "0.0.0.0", operatorTokenEnv: "TETHERBOX_OPERATOR_TOKEN" },
+      },
+      state,
+      queue,
+      webhookSecret: "secret",
+    });
+    await state.createJob(jobFixture());
+    await state.updateJob("job-1", "failed", "Codex failed", { retryEligible: true });
+    process.env.TETHERBOX_OPERATOR_TOKEN = "operator-secret";
+
+    try {
+      const rejected = await handler(new Request("https://bridge.example/api/jobs/job-1/retry", { method: "POST" }));
+      const accepted = await handler(
+        new Request("https://bridge.example/api/jobs/job-1/retry", {
+          method: "POST",
+          headers: { Authorization: "Bearer operator-secret" },
+        }),
+      );
+
+      expect(rejected.status).toBe(401);
+      expect(await accepted.json()).toEqual({ ok: true });
+    } finally {
+      delete process.env.TETHERBOX_OPERATOR_TOKEN;
+      state.close();
+    }
+  });
+
+  test("does not trust spoofed loopback hosts for public operator APIs", async () => {
+    const state = await loadedState();
+    const queue = new FakeQueue(state);
+    const handler = createRequestHandler({
+      config: {
+        ...config,
+        server: {
+          ...config.server,
+          host: "0.0.0.0",
+          operatorTokenEnv: "TETHERBOX_OPERATOR_TOKEN",
+        },
+      },
+      state,
+      queue,
+      webhookSecret: "secret",
+    });
+    await state.createJob(jobFixture());
+    await state.updateJob("job-1", "failed", "Codex failed", { retryEligible: true });
+    process.env.TETHERBOX_OPERATOR_TOKEN = "operator-secret";
+
+    try {
+      const rejected = await handler(new Request("http://localhost/api/jobs/job-1/retry", { method: "POST" }));
+      const accepted = await handler(
+        new Request("http://localhost/api/jobs/job-1/retry", {
+          method: "POST",
+          headers: { "X-Tetherbox-Operator-Token": "operator-secret" },
+        }),
+      );
+
+      expect(rejected.status).toBe(401);
+      expect(await rejected.json()).toEqual({ ok: false, reason: "operator_auth_required" });
+      expect(await accepted.json()).toEqual({ ok: true });
+      expect(queue.jobs).toHaveLength(1);
+    } finally {
+      delete process.env.TETHERBOX_OPERATOR_TOKEN;
+      state.close();
     }
   });
 });

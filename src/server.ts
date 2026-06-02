@@ -9,10 +9,12 @@ import {
   buildLinearOAuthAuthorizationUrl,
   completeLinearOAuthCallback,
   isStopSignal,
+  listLinearAgentSessionActivities,
   parseApprovalDecision,
   parseLinearAgentEvent,
   postLinearActivity,
   statusExternalUrl,
+  syncLinearIssueForAgentSession,
   updateLinearAgentSession,
   verifyLinearSignature,
 } from "./linear";
@@ -21,7 +23,7 @@ import { findExplicitRepo, routeRepoForSession } from "./repo-router";
 import { runJob } from "./job-runner";
 import { JobQueue } from "./job-queue";
 import { createJobId, StateStore } from "./state-store";
-import type { BridgeConfig, RepoMapping, RoutedJob } from "./types";
+import type { BridgeConfig, JobRecord, RepoMapping, RoutedJob } from "./types";
 
 export async function serve(configPath: string): Promise<void> {
   const config = await loadConfig(configPath);
@@ -106,8 +108,38 @@ export function createRequestHandler(options: RequestHandlerOptions): (request: 
 
     const cancelMatch = url.pathname.match(/^\/api\/jobs\/([^/]+)\/cancel$/);
     if (request.method === "POST" && cancelMatch) {
+      if (!isOperatorRequest(config, request, url)) {
+        return Response.json({ ok: false, reason: "operator_auth_required" }, { status: 401 });
+      }
       const canceled = await queue.cancel(decodeURIComponent(cancelMatch[1]!));
       return Response.json({ ok: canceled });
+    }
+
+    const retryMatch = url.pathname.match(/^\/api\/jobs\/([^/]+)\/retry$/);
+    if (request.method === "POST" && retryMatch) {
+      if (!isOperatorRequest(config, request, url)) {
+        return Response.json({ ok: false, reason: "operator_auth_required" }, { status: 401 });
+      }
+      const result = await retryJobFromApi(config, state, queue, decodeURIComponent(retryMatch[1]!));
+      return Response.json(result, { status: result.ok ? 200 : 409 });
+    }
+
+    const approveMatch = url.pathname.match(/^\/api\/jobs\/([^/]+)\/approve$/);
+    if (request.method === "POST" && approveMatch) {
+      if (!isOperatorRequest(config, request, url)) {
+        return Response.json({ ok: false, reason: "operator_auth_required" }, { status: 401 });
+      }
+      const result = await resolveApprovalFromApi(config, state, queue, decodeURIComponent(approveMatch[1]!), "approved");
+      return Response.json(result, { status: result.ok ? 200 : 409 });
+    }
+
+    const denyMatch = url.pathname.match(/^\/api\/jobs\/([^/]+)\/deny$/);
+    if (request.method === "POST" && denyMatch) {
+      if (!isOperatorRequest(config, request, url)) {
+        return Response.json({ ok: false, reason: "operator_auth_required" }, { status: 401 });
+      }
+      const result = await resolveApprovalFromApi(config, state, queue, decodeURIComponent(denyMatch[1]!), "denied");
+      return Response.json(result, { status: result.ok ? 200 : 409 });
     }
 
     if (request.method !== "POST" || url.pathname !== "/webhooks/linear") {
@@ -153,6 +185,114 @@ export function createRequestHandler(options: RequestHandlerOptions): (request: 
   };
 }
 
+function isOperatorRequest(config: BridgeConfig, request: Request, _url: URL): boolean {
+  if (isLoopbackHost(config.server.host)) {
+    return true;
+  }
+
+  const tokenEnv = config.server.operatorTokenEnv;
+  const expected = tokenEnv ? process.env[tokenEnv] : undefined;
+  if (!expected) {
+    return false;
+  }
+
+  const authorization = request.headers.get("Authorization");
+  const headerToken = request.headers.get("X-Tetherbox-Operator-Token");
+  return authorization === `Bearer ${expected}` || headerToken === expected;
+}
+
+function isLoopbackHost(host: string): boolean {
+  const normalized = host.toLowerCase();
+  return normalized === "127.0.0.1" || normalized === "localhost" || normalized === "::1";
+}
+
+async function retryJobFromApi(
+  config: BridgeConfig,
+  state: StateStore,
+  queue: Pick<JobQueue, "enqueue">,
+  jobId: string,
+): Promise<{ ok: boolean; reason?: string }> {
+  const record = state.getJob(jobId);
+  if (!record) {
+    return { ok: false, reason: "job_not_found" };
+  }
+  if (!record.retryEligible) {
+    return { ok: false, reason: "job_not_retry_eligible" };
+  }
+
+  const routed = routedJobFromRecord(config, record, record.policyDecision);
+  if (!routed) {
+    return { ok: false, reason: "repo_not_configured" };
+  }
+
+  await state.updateJob(record.id, "queued", "Retry queued from TUI", { retryEligible: false });
+  await state.addEvent("info", "Retry queued from TUI", record.id, "tui");
+  queue.enqueue(routed);
+  return { ok: true };
+}
+
+async function resolveApprovalFromApi(
+  config: BridgeConfig,
+  state: StateStore,
+  queue: Pick<JobQueue, "enqueue">,
+  jobId: string,
+  status: "approved" | "denied",
+): Promise<{ ok: boolean; reason?: string }> {
+  const record = state.getJob(jobId);
+  const approval = state.getPendingApprovalForJob(jobId);
+  if (!record || !approval) {
+    return { ok: false, reason: "pending_approval_not_found" };
+  }
+
+  state.resolveApproval(approval.id, status, "TUI");
+  if (status === "denied") {
+    await state.updateJob(record.id, "canceled", "Denied from TUI", { retryEligible: false });
+    await state.addEvent("warn", "Approval denied from TUI", record.id, "tui");
+    return { ok: true };
+  }
+
+  const routed = routedJobFromRecord(config, record, "allow_auto");
+  if (!routed) {
+    await state.updateJob(record.id, "failed", `Could not approve job; repo ${record.repo} is not configured`, {
+      retryEligible: false,
+    });
+    return { ok: false, reason: "repo_not_configured" };
+  }
+
+  await state.updateJob(record.id, "queued", "Approved from TUI; queued for local Codex", { retryEligible: false });
+  await state.addEvent("info", "Approval granted from TUI", record.id, "tui");
+  queue.enqueue(routed);
+  return { ok: true };
+}
+
+function routedJobFromRecord(
+  config: BridgeConfig,
+  record: JobRecord,
+  decision: RoutedJob["policy"]["decision"],
+): RoutedJob | undefined {
+  const repo = config.repos.find((candidate) => candidate.github === record.repo);
+  if (!repo) {
+    return undefined;
+  }
+
+  return {
+    id: record.id,
+    sessionId: record.sessionId,
+    prompt: record.prompt ?? "",
+    issue: {
+      identifier: record.issueIdentifier,
+      title: record.issueTitle,
+      labels: [],
+    },
+    repo,
+    policy: {
+      ruleName: decision === "allow_auto" ? `${record.policyRule}:tui` : record.policyRule,
+      decision,
+      sandbox: config.codex.sandbox,
+    },
+  };
+}
+
 interface LinearWebhookIntakeOptions {
   config: BridgeConfig;
   state: StateStore;
@@ -165,7 +305,6 @@ interface LinearWebhookIntakeOptions {
 async function intakeLinearWebhook(options: LinearWebhookIntakeOptions): Promise<void> {
   const { config, state, queue, event, sessionId, jobId } = options;
   const issue = getIssueContext(event);
-  const prompt = buildLinearJobPrompt(event);
   const replyPrompt = getPrompt(event);
   const externalUrl = statusExternalUrl(config, jobId);
   const handledApproval = await maybeHandleApprovalReply({
@@ -198,13 +337,17 @@ async function intakeLinearWebhook(options: LinearWebhookIntakeOptions): Promise
       { content: "Run Codex locally in an isolated worktree", status: "pending" },
       { content: "Report the result back to Linear", status: "pending" },
     ],
-  }, jobId);
+  }, undefined);
   await safePostLinearActivity(config, state, sessionId, {
     type: "thought",
     body: `Received Linear session ${sessionId}; routing local job ${jobId}.`,
-  }, jobId);
+  }, undefined);
+  await safeSyncLinearIssueLifecycle(config, state, issue);
 
+  let prompt = buildLinearJobPrompt(event);
   try {
+    const activities = await safeListLinearAgentSessionActivities(config, state, sessionId);
+    prompt = buildLinearJobPrompt(event, activities);
     const repo = await routeRepoForSession(config, issue, prompt, sessionId, state);
     const policy = applyPolicy(config, issue, repo, { prompt });
     const job: RoutedJob = { id: jobId, sessionId, prompt, issue, repo, policy };
@@ -234,11 +377,11 @@ async function intakeLinearWebhook(options: LinearWebhookIntakeOptions): Promise
           { content: "Run Codex locally in an isolated worktree", status: "pending" },
           { content: "Report the result back to Linear", status: "pending" },
         ],
-      }, jobId);
-      await postRepoSelection(config, state, sessionId, config.repos, jobId);
+      }, undefined);
+      await postRepoSelection(config, state, sessionId, config.repos);
       return;
     }
-    await state.addEvent("error", message, jobId, "linear");
+    await state.addEvent("error", message, undefined, "linear");
     await safeUpdateLinearAgentSession(config, state, sessionId, {
       plan: [
         { content: "Acknowledge Linear session", status: "completed" },
@@ -246,11 +389,11 @@ async function intakeLinearWebhook(options: LinearWebhookIntakeOptions): Promise
         { content: "Run Codex locally in an isolated worktree", status: "canceled" },
         { content: "Report the result back to Linear", status: "completed" },
       ],
-    }, jobId);
+    }, undefined);
     await safePostLinearActivity(config, state, sessionId, {
       type: "error",
       body: `Could not queue local job: ${message}`,
-    }, jobId);
+    }, undefined);
   }
 }
 
@@ -343,7 +486,6 @@ async function postRepoSelection(
   state: StateStore,
   sessionId: string,
   repos: RepoMapping[],
-  jobId: string,
 ): Promise<void> {
   await safePostLinearActivity(config, state, sessionId, {
     content: {
@@ -357,7 +499,7 @@ async function postRepoSelection(
         value: repo.github,
       })),
     },
-  }, jobId);
+  }, undefined);
 }
 
 function repoFromSelectionReply(
@@ -493,5 +635,49 @@ async function safePostLinearActivity(
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to post Linear activity";
     await state.addEvent("warn", message, jobId, "linear");
+  }
+}
+
+async function safeSyncLinearIssueLifecycle(
+  config: BridgeConfig,
+  state: StateStore,
+  issue: ReturnType<typeof getIssueContext>,
+): Promise<void> {
+  try {
+    const result = await syncLinearIssueForAgentSession(config, issue, state);
+    if (result.movedToState || result.delegateSet) {
+      await state.addEvent(
+        "info",
+        [
+          result.movedToState ? `Moved Linear issue to ${result.movedToState}` : undefined,
+          result.delegateSet ? "Set Tetherbox app user as Linear delegate" : undefined,
+        ]
+        .filter(Boolean)
+        .join("; "),
+        undefined,
+        "linear",
+      );
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Failed to sync Linear issue lifecycle";
+    await state.addEvent("warn", message, undefined, "linear");
+  }
+}
+
+async function safeListLinearAgentSessionActivities(
+  config: BridgeConfig,
+  state: StateStore,
+  sessionId: string,
+): Promise<Awaited<ReturnType<typeof listLinearAgentSessionActivities>>> {
+  try {
+    const activities = await listLinearAgentSessionActivities(config, sessionId, state);
+    if (activities.length) {
+      await state.addEvent("info", `Fetched ${activities.length} Linear Agent Session activities`, undefined, "linear");
+    }
+    return activities;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Failed to fetch Linear Agent Session activities";
+    await state.addEvent("warn", message, undefined, "linear");
+    return [];
   }
 }
