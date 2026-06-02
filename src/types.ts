@@ -23,6 +23,7 @@ export interface BridgeConfig {
     bin: string;
     model?: string;
     sandbox: SandboxMode;
+    minSupportedVersion?: string;
   };
   repos: RepoMapping[];
   policies: PolicyRule[];

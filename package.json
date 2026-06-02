@@ -12,6 +12,7 @@
     "start": "bun run src/index.ts daemon --config examples/config.json",
     "daemon": "bun run src/index.ts daemon --config examples/config.json",
     "tui": "bun run src/index.ts tui --url http://127.0.0.1:8787",
+    "generate:codex-protocol": "bun run scripts/generate-codex-protocol.ts",
     "test": "bun test",
     "check": "bun test && bun run scripts/check-format.ts"
   },

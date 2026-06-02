@@ -13,10 +13,11 @@ Early scaffold. The current app includes:
 - Basic agent-session event parsing.
 - Repository routing from local config.
 - Deterministic policy decisions.
-- Daemon state persisted to a local JSON file.
+- Daemon state persisted to local SQLite.
 - `/healthz` and `/api/status` daemon endpoints.
 - Terminal UI for watching jobs and events.
 - Per-job Git worktrees under the configured daemon state directory.
+- Generated Codex App Server protocol bindings.
 - Codex App Server JSON-RPC client over `stdio`.
 - Local job runner that starts a Codex thread and turn.
 
@@ -53,6 +54,16 @@ bun run src/index.ts tui --url http://127.0.0.1:8787
 Press `q` to quit.
 
 `serve` remains as an alias for `daemon`.
+
+## Codex Protocol Bindings
+
+Regenerate the checked-in Codex App Server TypeScript bindings and JSON schemas with:
+
+```bash
+bun run generate:codex-protocol
+```
+
+The command writes output under `generated/codex-app-server/` and records the Codex CLI version in `metadata.json` and `metadata.ts`. Daemon startup checks the installed Codex CLI against `codex.minSupportedVersion` when configured, otherwise against the generated protocol metadata.
 
 Completed and failed job worktrees are retained by default for seven days. Run explicit garbage collection with:
 

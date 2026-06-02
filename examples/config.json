@@ -18,7 +18,8 @@
   "codex": {
     "bin": "codex",
     "model": "gpt-5.5",
-    "sandbox": "workspace-write"
+    "sandbox": "workspace-write",
+    "minSupportedVersion": "0.135.0"
   },
   "repos": [
     {
