@@ -137,6 +137,8 @@ rules:
   - name: docs-auto
     when:
       labels: ["docs"]
+      repos: ["lucasilverentand/example"]
+      teams: ["ENG"]
     decision: allow_auto
     sandbox: workspace-write
 
@@ -148,10 +150,11 @@ rules:
   - name: security-sensitive-plan-only
     when:
       labels: ["security"]
+      priorities: [2, 3]
     decision: allow_plan_only
 ```
 
-The policy layer should be deterministic and inspectable. Linear should show which rule was applied.
+The policy layer should be deterministic and inspectable. Rules are evaluated in config order, the first matching rule wins, and every matcher present on a rule must match. Linear should show which rule was applied.
 
 ### Repository Mapper
 
@@ -530,4 +533,3 @@ tetherbox/
 First milestone issue:
 
 > Build the single-host Linear-to-Codex prototype. A Linear agent session should start a local `codex app-server` turn over stdio, stream basic progress back to Linear, and persist session/job state in SQLite.
-

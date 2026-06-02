@@ -206,7 +206,7 @@ async function intakeLinearWebhook(options: LinearWebhookIntakeOptions): Promise
 
   try {
     const repo = await routeRepoForSession(config, issue, prompt, sessionId, state);
-    const policy = applyPolicy(config, issue, repo);
+    const policy = applyPolicy(config, issue, repo, { prompt });
     const job: RoutedJob = { id: jobId, sessionId, prompt, issue, repo, policy };
     await state.createJob(job);
     await safeUpdateLinearAgentSession(config, state, sessionId, {
@@ -307,7 +307,7 @@ async function maybeHandleRepoSelectionReply(options: {
   }
 
   state.resolveRepoSelection(pending.id, "resolved", selectedRepo.github);
-  const policy = applyPolicy(config, pending.issue, selectedRepo);
+  const policy = applyPolicy(config, pending.issue, selectedRepo, { prompt: pending.prompt });
   const job: RoutedJob = {
     id: pending.jobId,
     sessionId,
