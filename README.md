@@ -16,6 +16,7 @@ Early scaffold. The current app includes:
 - Daemon state persisted to a local JSON file.
 - `/healthz` and `/api/status` daemon endpoints.
 - Terminal UI for watching jobs and events.
+- Per-job Git worktrees under the configured daemon state directory.
 - Codex App Server JSON-RPC client over `stdio`.
 - Local job runner that starts a Codex thread and turn.
 
@@ -52,6 +53,12 @@ bun run src/index.ts tui --url http://127.0.0.1:8787
 Press `q` to quit.
 
 `serve` remains as an alias for `daemon`.
+
+Completed and failed job worktrees are retained by default for seven days. Run explicit garbage collection with:
+
+```bash
+bun run src/index.ts gc-worktrees --config config.local.json
+```
 
 ## Service Mode
 

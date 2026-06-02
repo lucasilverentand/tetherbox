@@ -9,6 +9,7 @@ export interface BridgeConfig {
   };
   state?: {
     path: string;
+    worktreeRetentionDays?: number;
   };
   linear: {
     webhookSecretEnv: string;
@@ -89,6 +90,8 @@ export interface JobRecord {
   sessionId: string;
   status: JobStatus;
   repo: string;
+  branchName?: string;
+  worktreePath?: string;
   issueIdentifier?: string;
   issueTitle?: string;
   policyRule: string;
