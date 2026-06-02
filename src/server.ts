@@ -676,7 +676,7 @@ function selectionValue(event: ReturnType<typeof parseLinearAgentEvent>): string
 
 function repoFromSelectionText(repos: RepoMapping[], text: string): RepoMapping | undefined {
   const normalized = text.toLowerCase();
-  const fullNameMatches = repos.filter((repo) => normalized.includes(repo.github.toLowerCase()));
+  const fullNameMatches = repos.filter((repo) => textMentionsFullRepoName(normalized, repo.github));
   if (fullNameMatches.length === 1) {
     return fullNameMatches[0];
   }
@@ -686,6 +686,11 @@ function repoFromSelectionText(repos: RepoMapping[], text: string): RepoMapping 
 
   const repoNameMatches = repos.filter((repo) => textMentionsRepoName(normalized, repo.github.split("/").at(-1) ?? repo.github));
   return repoNameMatches.length === 1 ? repoNameMatches[0] : undefined;
+}
+
+function textMentionsFullRepoName(normalizedText: string, repoFullName: string): boolean {
+  const normalizedRepo = repoFullName.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(^|[^a-z0-9._-])${normalizedRepo}([^a-z0-9._-]|$)`, "i").test(normalizedText);
 }
 
 function textMentionsRepoName(normalizedText: string, repoName: string): boolean {
