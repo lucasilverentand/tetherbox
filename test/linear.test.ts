@@ -1261,6 +1261,23 @@ describe("Linear webhook handling", () => {
     }
   });
 
+  test("rejects Linear OAuth admin scope for app actor installs before storing state", async () => {
+    process.env.LINEAR_CLIENT_ID = "client-1";
+    const store = await loadedState();
+
+    try {
+      expect(() => buildLinearOAuthAuthorizationUrl(
+        { ...oauthConfig, linear: { ...oauthConfig.linear, oauthScopes: ["read", "admin", "app:assignable"] } },
+        store,
+        "state-admin",
+      )).toThrow("Linear app actor OAuth cannot request the admin scope");
+      expect(store.consumeLinearOAuthState("state-admin")).toBeUndefined();
+    } finally {
+      store.close();
+      delete process.env.LINEAR_CLIENT_ID;
+    }
+  });
+
   test("exchanges Linear OAuth callbacks and stores app actor tokens", async () => {
     process.env.LINEAR_CLIENT_ID = "client-1";
     process.env.LINEAR_CLIENT_SECRET = "secret-1";

@@ -63,6 +63,8 @@ Use these settings:
 - Webhook categories: Agent session events, Inbox Notifications, Permission changes, OAuth app
 - OAuth scopes: `read`, `write`, `app:assignable`, `app:mentionable`, `customer:read`, `initiative:read`
 
+Do not include the `admin` scope in `linear.oauthScopes`; Linear app actor installs use `actor=app`, which cannot request admin access.
+
 Install the app actor by opening:
 
 ```text

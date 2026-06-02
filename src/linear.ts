@@ -649,6 +649,7 @@ export function buildLinearOAuthAuthorizationUrl(
 ): URL {
   const clientId = getRequiredConfigEnv(config.linear.oauthClientIdEnv, "linear.oauthClientIdEnv");
   const redirectUri = getOAuthRedirectUri(config);
+  const scopes = linearAppActorOAuthScopes(config);
   const expiresAt = new Date(now.getTime() + 10 * 60 * 1000).toISOString();
   stateStore.createLinearOAuthState(state, redirectUri, expiresAt);
 
@@ -656,7 +657,7 @@ export function buildLinearOAuthAuthorizationUrl(
   url.searchParams.set("client_id", clientId);
   url.searchParams.set("redirect_uri", redirectUri);
   url.searchParams.set("response_type", "code");
-  url.searchParams.set("scope", (config.linear.oauthScopes ?? DEFAULT_OAUTH_SCOPES).join(","));
+  url.searchParams.set("scope", scopes.join(","));
   url.searchParams.set("state", state);
   url.searchParams.set("actor", "app");
   return url;
@@ -1246,6 +1247,14 @@ function getOAuthRedirectUri(config: BridgeConfig): string {
     throw new Error("Config must include linear.oauthRedirectUri or server.publicUrl for Linear OAuth");
   }
   return `${config.server.publicUrl.replace(/\/$/, "")}/oauth/linear/callback`;
+}
+
+function linearAppActorOAuthScopes(config: BridgeConfig): string[] {
+  const scopes = config.linear.oauthScopes ?? DEFAULT_OAUTH_SCOPES;
+  if (scopes.some((scope) => scope.trim().toLowerCase() === "admin")) {
+    throw new Error("Linear app actor OAuth cannot request the admin scope");
+  }
+  return scopes;
 }
 
 function getRequiredConfigEnv(name: string | undefined, field: string): string {
