@@ -92,13 +92,53 @@ describe("Linear webhook handling", () => {
     const prompted = parseLinearAgentEvent(
       JSON.stringify({
         action: "prompted",
-        agentSession: { id: "sess_1", promptContext: "" },
+        agentSession: { id: "sess_1", promptContext: "<issue><title>Fix checkout</title></issue>" },
         agentActivity: { body: "Please also add tests" },
       }),
     );
 
     expect(getPrompt(created)).toContain("<issue>");
     expect(getPrompt(prompted)).toBe("Please also add tests");
+  });
+
+  test("posts select signal metadata with agent activities", async () => {
+    const calls: unknown[] = [];
+    const restore = mockFetch(calls);
+    process.env.LINEAR_API_KEY = "lin_test";
+
+    try {
+      await postLinearActivity(config, "sess_1", {
+        content: {
+          type: "elicitation",
+          body: "Select a repository.",
+        },
+        signal: "select",
+        signalMetadata: {
+          options: [{ label: "lucasilverentand/api", value: "lucasilverentand/api" }],
+        },
+      });
+    } finally {
+      restore();
+      delete process.env.LINEAR_API_KEY;
+    }
+
+    expect(calls[0]).toMatchObject({
+      body: {
+        variables: {
+          input: {
+            agentSessionId: "sess_1",
+            content: {
+              type: "elicitation",
+              body: "Select a repository.",
+            },
+            signal: "select",
+            signalMetadata: {
+              options: [{ label: "lucasilverentand/api", value: "lucasilverentand/api" }],
+            },
+          },
+        },
+      },
+    });
   });
 
   test("parses approval reply prompts", () => {

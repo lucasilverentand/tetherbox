@@ -17,11 +17,11 @@ import {
   verifyLinearSignature,
 } from "./linear";
 import { applyPolicy } from "./policy";
-import { routeRepoForSession } from "./repo-router";
+import { findExplicitRepo, routeRepoForSession } from "./repo-router";
 import { runJob } from "./job-runner";
 import { JobQueue } from "./job-queue";
 import { createJobId, StateStore } from "./state-store";
-import type { BridgeConfig, RoutedJob } from "./types";
+import type { BridgeConfig, RepoMapping, RoutedJob } from "./types";
 
 export async function serve(configPath: string): Promise<void> {
   const config = await loadConfig(configPath);
@@ -178,6 +178,17 @@ async function intakeLinearWebhook(options: LinearWebhookIntakeOptions): Promise
   if (handledApproval) {
     return;
   }
+  const handledRepoSelection = await maybeHandleRepoSelectionReply({
+    config,
+    state,
+    queue,
+    event,
+    sessionId,
+    prompt: replyPrompt,
+  });
+  if (handledRepoSelection) {
+    return;
+  }
 
   await safeUpdateLinearAgentSession(config, state, sessionId, {
     ...(externalUrl ? { externalUrls: [externalUrl] } : {}),
@@ -214,6 +225,19 @@ async function intakeLinearWebhook(options: LinearWebhookIntakeOptions): Promise
     queue.enqueue(job);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Linear webhook intake failed";
+    if (message === "Could not route Linear issue to a local repository") {
+      state.createRepoSelection({ id: jobId, sessionId, prompt, issue });
+      await safeUpdateLinearAgentSession(config, state, sessionId, {
+        plan: [
+          { content: "Acknowledge Linear session", status: "completed" },
+          { content: "Route Linear context to a local repository", status: "inProgress" },
+          { content: "Run Codex locally in an isolated worktree", status: "pending" },
+          { content: "Report the result back to Linear", status: "pending" },
+        ],
+      }, jobId);
+      await postRepoSelection(config, state, sessionId, config.repos, jobId);
+      return;
+    }
     await state.addEvent("error", message, jobId);
     await safeUpdateLinearAgentSession(config, state, sessionId, {
       plan: [
@@ -260,6 +284,107 @@ async function handleLinearStopSignal(options: {
     type: "response",
     body: "Stopped the local Codex run.",
   }, activeJob.id);
+}
+
+async function maybeHandleRepoSelectionReply(options: {
+  config: BridgeConfig;
+  state: StateStore;
+  queue: Pick<JobQueue, "enqueue">;
+  event: ReturnType<typeof parseLinearAgentEvent>;
+  sessionId: string;
+  prompt: string;
+}): Promise<boolean> {
+  const { config, state, queue, event, sessionId, prompt } = options;
+  const pending = state.getPendingRepoSelectionForSession(sessionId);
+  if (!pending) {
+    return false;
+  }
+
+  const selectedRepo = repoFromSelectionReply(config, event, prompt);
+  if (!selectedRepo) {
+    await postRepoSelection(config, state, sessionId, config.repos, pending.jobId);
+    return true;
+  }
+
+  state.resolveRepoSelection(pending.id, "resolved", selectedRepo.github);
+  const policy = applyPolicy(config, pending.issue, selectedRepo);
+  const job: RoutedJob = {
+    id: pending.jobId,
+    sessionId,
+    prompt: pending.prompt,
+    issue: pending.issue,
+    repo: selectedRepo,
+    policy,
+  };
+  await state.createJob(job);
+  await safeUpdateLinearAgentSession(config, state, sessionId, {
+    plan: [
+      { content: "Acknowledge Linear session", status: "completed" },
+      { content: "Route Linear context to a local repository", status: "completed" },
+      { content: "Run Codex locally in an isolated worktree", status: "pending" },
+      { content: "Report the result back to Linear", status: "pending" },
+    ],
+  }, pending.jobId);
+  await safePostLinearActivity(config, state, sessionId, {
+    type: "thought",
+    body: `Queued local Tetherbox job ${job.id} for ${selectedRepo.github}.`,
+  }, pending.jobId);
+  queue.enqueue(job);
+  return true;
+}
+
+async function postRepoSelection(
+  config: BridgeConfig,
+  state: StateStore,
+  sessionId: string,
+  repos: RepoMapping[],
+  jobId: string,
+): Promise<void> {
+  await safePostLinearActivity(config, state, sessionId, {
+    content: {
+      type: "elicitation",
+      body: "Select the repository Tetherbox should use for this local Codex run.",
+    },
+    signal: "select",
+    signalMetadata: {
+      options: repos.map((repo) => ({
+        label: repo.github,
+        value: repo.github,
+      })),
+    },
+  }, jobId);
+}
+
+function repoFromSelectionReply(
+  config: BridgeConfig,
+  event: ReturnType<typeof parseLinearAgentEvent>,
+  prompt: string,
+): RepoMapping | undefined {
+  const selected = selectionValue(event);
+  if (selected) {
+    const byValue = config.repos.find((repo) => repo.github.toLowerCase() === selected.toLowerCase());
+    if (byValue) {
+      return byValue;
+    }
+  }
+
+  return findExplicitRepo(config.repos, prompt);
+}
+
+function selectionValue(event: ReturnType<typeof parseLinearAgentEvent>): string | undefined {
+  const metadata = event.agentActivity?.signalMetadata ?? event.agentActivity?.content?.signalMetadata;
+  if (typeof metadata === "string") {
+    return metadata;
+  }
+  if (metadata && typeof metadata === "object" && !Array.isArray(metadata)) {
+    const record = metadata as Record<string, unknown>;
+    for (const key of ["value", "repositoryFullName", "repo", "repository"]) {
+      if (typeof record[key] === "string") {
+        return record[key];
+      }
+    }
+  }
+  return undefined;
 }
 
 async function maybeHandleApprovalReply(options: {

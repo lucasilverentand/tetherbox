@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import { Database } from "bun:sqlite";
-import type { DaemonEvent, DaemonState, JobRecord, JobStatus, RepoMapping, RoutedJob } from "./types";
+import type { DaemonEvent, DaemonState, JobRecord, JobStatus, LinearIssueContext, RepoMapping, RoutedJob } from "./types";
 import type { WorktreeInfo } from "./worktree-manager";
 
 interface JobRow {
@@ -86,6 +86,26 @@ interface PendingApprovalRow {
   job_id: string;
   requested_action: string;
   status: "pending" | "approved" | "denied";
+}
+
+export interface PendingRepoSelectionRecord {
+  id: string;
+  sessionId: string;
+  jobId: string;
+  prompt: string;
+  issue: LinearIssueContext;
+  status: "pending" | "resolved" | "canceled";
+  selectedRepo?: string;
+}
+
+interface PendingRepoSelectionRow {
+  id: string;
+  session_id: string;
+  job_id: string;
+  prompt: string;
+  issue_json: string;
+  status: "pending" | "resolved" | "canceled";
+  selected_repo: string | null;
 }
 
 export interface JobUpdateOptions {
@@ -372,6 +392,73 @@ export class StateStore {
       .run(status, approver ?? null, new Date().toISOString(), id);
   }
 
+  createRepoSelection(job: Pick<RoutedJob, "id" | "sessionId" | "prompt" | "issue">): PendingRepoSelectionRecord {
+    const db = this.requireDb();
+    const now = new Date().toISOString();
+    const id = `${job.sessionId}:repo-selection`;
+    const issueJson = JSON.stringify(job.issue);
+    db.transaction(() => {
+      db.query(
+        `insert into sessions (
+          id, issue_id, issue_identifier, issue_title, repo, status, created_at, updated_at
+        ) values (?, ?, ?, ?, ?, 'awaiting_repo', ?, ?)
+        on conflict(id) do update set
+          issue_id = excluded.issue_id,
+          issue_identifier = excluded.issue_identifier,
+          issue_title = excluded.issue_title,
+          status = excluded.status,
+          updated_at = excluded.updated_at`,
+      ).run(
+        job.sessionId,
+        job.issue.id ?? null,
+        job.issue.identifier ?? null,
+        job.issue.title ?? null,
+        "",
+        now,
+        now,
+      );
+      db.query(
+        `insert into repo_selections (
+          id, session_id, job_id, prompt, issue_json, status, created_at, updated_at
+        ) values (?, ?, ?, ?, ?, 'pending', ?, ?)
+        on conflict(id) do update set
+          job_id = excluded.job_id,
+          prompt = excluded.prompt,
+          issue_json = excluded.issue_json,
+          status = 'pending',
+          selected_repo = null,
+          updated_at = excluded.updated_at`,
+      ).run(id, job.sessionId, job.id, job.prompt, issueJson, now, now);
+    })();
+
+    return {
+      id,
+      sessionId: job.sessionId,
+      jobId: job.id,
+      prompt: job.prompt,
+      issue: job.issue,
+      status: "pending",
+    };
+  }
+
+  getPendingRepoSelectionForSession(sessionId: string): PendingRepoSelectionRecord | undefined {
+    const row = this.requireDb()
+      .query(
+        `select * from repo_selections
+         where session_id = ? and status = 'pending'
+         order by updated_at desc
+         limit 1`,
+      )
+      .get(sessionId) as PendingRepoSelectionRow | null;
+    return row ? repoSelectionFromRow(row) : undefined;
+  }
+
+  resolveRepoSelection(id: string, status: "resolved" | "canceled", selectedRepo?: string): void {
+    this.requireDb()
+      .query("update repo_selections set status = ?, selected_repo = ?, updated_at = ? where id = ?")
+      .run(status, selectedRepo ?? null, new Date().toISOString(), id);
+  }
+
   getSessionThreadId(sessionId: string): string | undefined {
     const row = this.requireDb()
       .query("select codex_thread_id from sessions where id = ?")
@@ -587,6 +674,18 @@ export class StateStore {
         updated_at text not null
       );
 
+      create table if not exists repo_selections (
+        id text primary key,
+        session_id text not null references sessions(id) on delete cascade,
+        job_id text not null,
+        prompt text not null,
+        issue_json text not null,
+        status text not null,
+        selected_repo text,
+        created_at text not null,
+        updated_at text not null
+      );
+
       create table if not exists pull_requests (
         id text primary key,
         job_id text references jobs(id) on delete cascade,
@@ -684,6 +783,18 @@ function eventFromRow(row: EventRow): DaemonEvent {
     level: row.level,
     message: row.message,
     createdAt: row.created_at,
+  };
+}
+
+function repoSelectionFromRow(row: PendingRepoSelectionRow): PendingRepoSelectionRecord {
+  return {
+    id: row.id,
+    sessionId: row.session_id,
+    jobId: row.job_id,
+    prompt: row.prompt,
+    issue: JSON.parse(row.issue_json) as LinearIssueContext,
+    status: row.status,
+    selectedRepo: row.selected_repo ?? undefined,
   };
 }
 

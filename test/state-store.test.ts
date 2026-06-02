@@ -24,6 +24,7 @@ describe("StateStore", () => {
     expect(tables).toContain("jobs");
     expect(tables).toContain("job_events");
     expect(tables).toContain("approvals");
+    expect(tables).toContain("repo_selections");
     expect(tables).toContain("pull_requests");
     expect(tables).toContain("repo_mappings");
   });
@@ -176,6 +177,27 @@ describe("StateStore", () => {
 
     store.resolveApproval(approval.id, "approved", "Luca");
     expect(store.getPendingApprovalForSession("session-1")).toBeUndefined();
+    store.close();
+  });
+
+  test("creates and resolves pending repo selections", async () => {
+    const path = await statePath();
+    const store = new StateStore(path);
+    await store.load();
+
+    const selection = store.createRepoSelection(jobFixture());
+    expect(selection).toMatchObject({
+      sessionId: "session-1",
+      jobId: "job-1",
+      status: "pending",
+      issue: {
+        identifier: "ENG-1",
+      },
+    });
+    expect(store.getPendingRepoSelectionForSession("session-1")?.id).toBe(selection.id);
+
+    store.resolveRepoSelection(selection.id, "resolved", "lucasilverentand/example");
+    expect(store.getPendingRepoSelectionForSession("session-1")).toBeUndefined();
     store.close();
   });
 

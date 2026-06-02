@@ -54,7 +54,6 @@ describe("server webhook handling", () => {
       ]);
 
       expect(response).not.toBe("timeout");
-      expect(fetchMock.pending).toHaveLength(1);
       expect(queue.jobs).toHaveLength(0);
       expect(await (response as Response).json()).toMatchObject({
         ok: true,
@@ -62,6 +61,7 @@ describe("server webhook handling", () => {
         sessionId: "sess_1",
       });
 
+      await waitFor(() => fetchMock.pending.length === 1);
       fetchMock.resolveNext({ data: { agentSessionUpdate: { success: true } } });
       await waitFor(() => fetchMock.pending.length === 1);
       fetchMock.resolveNext({ data: { agentActivityCreate: { success: true } } });
@@ -366,6 +366,124 @@ describe("server webhook handling", () => {
       expect(state.snapshot().jobs).toHaveLength(0);
       expect(queue.jobs).toHaveLength(0);
       expect(state.snapshot().events[0]?.message).toContain("no active job");
+    } finally {
+      fetchMock.restore();
+      state.close();
+      delete process.env.LINEAR_API_KEY;
+    }
+  });
+
+  test("asks Linear to select a repo when routing is ambiguous", async () => {
+    process.env.LINEAR_API_KEY = "lin_test";
+    const fetchMock = mockDeferredFetch();
+    const state = await loadedState();
+    const queue = new FakeQueue(state);
+    const handler = createRequestHandler({
+      config,
+      state,
+      queue,
+      webhookSecret: "secret",
+    });
+    const body = JSON.stringify({
+      action: "created",
+      agentSession: {
+        id: "sess_select",
+        promptContext: "Fix this without a repo hint",
+        issue: {
+          identifier: "OSS-230",
+          title: "Pick a repo",
+          labels: [],
+        },
+      },
+    });
+
+    try {
+      const response = await handler(
+        new Request("http://127.0.0.1:8787/webhooks/linear", {
+          method: "POST",
+          headers: { "Linear-Signature": signature(body, "secret") },
+          body,
+        }),
+      );
+
+      expect(response.status).toBe(200);
+      await waitFor(() => fetchMock.pending.length === 1);
+      fetchMock.resolveNext({ data: { agentSessionUpdate: { success: true } } });
+      await waitFor(() => fetchMock.pending.length === 1);
+      fetchMock.resolveNext({ data: { agentActivityCreate: { success: true } } });
+      await waitFor(() => fetchMock.pending.length === 1);
+      fetchMock.resolveNext({ data: { agentSessionUpdate: { success: true } } });
+      await waitFor(() => fetchMock.pending.length === 1);
+      fetchMock.resolveNext({ data: { agentActivityCreate: { success: true } } });
+      await waitFor(() => state.getPendingRepoSelectionForSession("sess_select") !== undefined);
+
+      expect(queue.jobs).toHaveLength(0);
+      expect(state.snapshot().jobs).toHaveLength(0);
+      expect(state.getPendingRepoSelectionForSession("sess_select")).toMatchObject({
+        sessionId: "sess_select",
+        issue: {
+          identifier: "OSS-230",
+        },
+      });
+    } finally {
+      fetchMock.restore();
+      state.close();
+      delete process.env.LINEAR_API_KEY;
+    }
+  });
+
+  test("queues the original job after a Linear repo selection reply", async () => {
+    process.env.LINEAR_API_KEY = "lin_test";
+    const fetchMock = mockDeferredFetch();
+    const state = await loadedState();
+    const queue = new FakeQueue(state);
+    state.createRepoSelection(jobFixture({
+      id: "job-select",
+      sessionId: "sess_select",
+      prompt: "Original issue context",
+    }));
+    const handler = createRequestHandler({
+      config,
+      state,
+      queue,
+      webhookSecret: "secret",
+    });
+    const body = JSON.stringify({
+      action: "prompted",
+      agentSession: { id: "sess_select", promptContext: "Original issue context" },
+      agentActivity: {
+        body: "lucasilverentand/api",
+        signal: "select",
+        signalMetadata: { value: "lucasilverentand/api" },
+      },
+    });
+
+    try {
+      const response = await handler(
+        new Request("http://127.0.0.1:8787/webhooks/linear", {
+          method: "POST",
+          headers: { "Linear-Signature": signature(body, "secret") },
+          body,
+        }),
+      );
+
+      expect(response.status).toBe(200);
+      await waitFor(() => fetchMock.pending.length === 1);
+      fetchMock.resolveNext({ data: { agentSessionUpdate: { success: true } } });
+      await waitFor(() => fetchMock.pending.length === 1);
+      fetchMock.resolveNext({ data: { agentActivityCreate: { success: true } } });
+      await waitFor(() => queue.jobs.length === 1);
+
+      expect(queue.jobs[0]).toMatchObject({
+        id: "job-select",
+        sessionId: "sess_select",
+        prompt: "Original issue context",
+        repo: {
+          github: "lucasilverentand/api",
+        },
+      });
+      expect(state.getPendingRepoSelectionForSession("sess_select")).toBeUndefined();
+      expect(state.getJob("job-select")?.repo).toBe("lucasilverentand/api");
     } finally {
       fetchMock.restore();
       state.close();
