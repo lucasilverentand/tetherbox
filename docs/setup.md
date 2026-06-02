@@ -71,6 +71,7 @@ Tetherbox redirects to Linear with `actor=app`, validates callback state, exchan
 That stored app user ID is also used to set the issue delegate when a session starts. If the delegated issue is still in backlog or another non-started state, Tetherbox moves it to the team's first started workflow state before queueing local Codex work.
 When API access is available, Tetherbox reads Agent Session activities and includes their frozen prompt/action/response history in the local Codex prompt so follow-up work is not dependent on editable comments alone.
 Follow-up prompts for the same Agent Session are serialized behind the active session job before they continue the shared Codex thread. Jobs for different Agent Sessions still use the configured queue concurrency.
+Short-lived progress activities, including session receipt, queueing, and starting Codex, are marked ephemeral so Linear can replace them with later agent activity. Durable outcomes such as prompts, validation results, pull requests, errors, and final responses remain persistent.
 After successful implementation, created or updated GitHub pull requests are added to the Linear Agent Session with `addedExternalUrls`. When `server.publicUrl` is configured, the session also keeps a link back to the local Tetherbox job status without replacing existing session links. Tetherbox then moves the source issue to `linear.reviewStateName`, defaulting to `In Review`, when that state exists for the issue's team.
 
 ## Webhook Configuration

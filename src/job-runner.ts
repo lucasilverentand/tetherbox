@@ -298,9 +298,12 @@ async function runCodexTurn(
   },
 ): Promise<void> {
   await postActivity(config, state, job, {
-    type: "action",
-    action: "Started Codex",
-    parameter: options.actionParameter,
+    content: {
+      type: "action",
+      action: "Started Codex",
+      parameter: options.actionParameter,
+    },
+    ephemeral: true,
   });
   const existingThreadId = state.getSessionThreadId(job.sessionId);
   const threadId = await client.runTurn({

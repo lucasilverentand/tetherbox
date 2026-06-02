@@ -153,6 +153,25 @@ describe("server webhook handling", () => {
           url: expect.stringMatching(/^https:\/\/bridge\.example\/api\/status#sess_1-[a-f0-9]{8}$/),
         }],
       });
+      const activities = linearActivityInputs(fetchMock.calls);
+      expect(activities).toContainEqual(
+        expect.objectContaining({
+          ephemeral: true,
+          content: expect.objectContaining({
+            type: "thought",
+            body: expect.stringContaining("Received Linear session sess_1"),
+          }),
+        }),
+      );
+      expect(activities).toContainEqual(
+        expect.objectContaining({
+          ephemeral: true,
+          content: expect.objectContaining({
+            type: "thought",
+            body: expect.stringContaining("Queued local Tetherbox job"),
+          }),
+        }),
+      );
     } finally {
       fetchMock.restore();
       state.close();
@@ -1338,6 +1357,30 @@ function mockDeferredFetch(): {
       );
     },
   };
+}
+
+function linearActivityInputs(calls: unknown[]): unknown[] {
+  return calls
+    .map((call) => {
+      if (
+        typeof call === "object"
+        && call !== null
+        && "body" in call
+        && typeof call.body === "object"
+        && call.body !== null
+        && "query" in call.body
+        && typeof call.body.query === "string"
+        && call.body.query.includes("agentActivityCreate")
+        && "variables" in call.body
+        && typeof call.body.variables === "object"
+        && call.body.variables !== null
+        && "input" in call.body.variables
+      ) {
+        return call.body.variables.input;
+      }
+      return undefined;
+    })
+    .filter((input) => input !== undefined);
 }
 
 async function waitFor(predicate: () => boolean): Promise<void> {

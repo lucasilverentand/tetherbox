@@ -488,8 +488,11 @@ async function intakeLinearWebhook(options: LinearWebhookIntakeOptions): Promise
     ],
   }, undefined);
   await safePostLinearActivity(config, state, sessionId, {
-    type: "thought",
-    body: `Received Linear session ${sessionId}; routing local job ${jobId}.`,
+    content: {
+      type: "thought",
+      body: `Received Linear session ${sessionId}; routing local job ${jobId}.`,
+    },
+    ephemeral: true,
   }, undefined);
   await safeSyncLinearIssueLifecycle(config, state, issue);
 
@@ -511,8 +514,11 @@ async function intakeLinearWebhook(options: LinearWebhookIntakeOptions): Promise
       ],
     }, jobId);
     await safePostLinearActivity(config, state, sessionId, {
-      type: "thought",
-      body: `Queued local Tetherbox job ${job.id} for ${repo.github}.`,
+      content: {
+        type: "thought",
+        body: `Queued local Tetherbox job ${job.id} for ${repo.github}.`,
+      },
+      ephemeral: true,
     }, jobId);
     queue.enqueue(job);
   } catch (error) {
@@ -630,8 +636,11 @@ async function maybeHandleRepoSelectionReply(options: {
     ],
   }, pending.jobId);
   await safePostLinearActivity(config, state, sessionId, {
-    type: "thought",
-    body: `Queued local Tetherbox job ${job.id} for ${selectedRepo.github}.`,
+    content: {
+      type: "thought",
+      body: `Queued local Tetherbox job ${job.id} for ${selectedRepo.github}.`,
+    },
+    ephemeral: true,
   }, pending.jobId);
   queue.enqueue(job);
   return true;
