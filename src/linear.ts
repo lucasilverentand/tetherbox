@@ -87,6 +87,11 @@ export interface LinearInboxNotificationWebhook {
     url?: string;
     authorName?: string;
   };
+  reaction?: {
+    emoji?: string;
+    name?: string;
+    actorName?: string;
+  };
 }
 
 export type LinearApprovalDecision = "approve" | "deny";
@@ -222,6 +227,7 @@ export function getLinearInboxNotificationWebhook(event: LinearAgentSessionEvent
     ...(event.appUserId ? { appUserId: event.appUserId } : {}),
     ...definedIssue(extractNotificationIssue(event.notification)),
     ...definedComment(extractNotificationComment(event.notification)),
+    ...definedReaction(extractNotificationReaction(event.notification)),
   };
 }
 
@@ -239,10 +245,16 @@ export function formatLinearInboxNotificationWebhookEvent(event: LinearInboxNoti
     event.comment?.url,
     event.comment?.id && !event.comment.url ? event.comment.id : undefined,
   ].filter(Boolean);
+  const reactionParts = [
+    event.reaction?.actorName,
+    event.reaction?.emoji,
+    event.reaction?.name && event.reaction.name !== event.reaction.emoji ? event.reaction.name : undefined,
+  ].filter(Boolean);
   return [
     `Linear app-user notification: ${event.action}`,
     issueParts.length ? `issue: ${issueParts.join(" / ")}` : undefined,
     commentParts.length ? `comment: ${commentParts.join(" / ")}` : undefined,
+    reactionParts.length ? `reaction: ${reactionParts.join(" / ")}` : undefined,
   ]
     .filter(Boolean)
     .join("; ");
@@ -934,6 +946,43 @@ function extractNotificationComment(value: unknown): LinearInboxNotificationWebh
   return Object.keys(result).length ? result : undefined;
 }
 
+function extractNotificationReaction(value: unknown): LinearInboxNotificationWebhook["reaction"] | undefined {
+  const notification = recordValue(value);
+  if (!notification) {
+    return undefined;
+  }
+
+  const reaction =
+    recordValue(notification.reaction) ??
+    recordValue(notification.emojiReaction) ??
+    recordValue(notification.commentReaction) ??
+    recordValue(notification.issueReaction);
+  const actor =
+    recordValue(reaction?.user) ??
+    recordValue(reaction?.actor) ??
+    recordValue(reaction?.creator) ??
+    recordValue(notification.user) ??
+    recordValue(notification.actor) ??
+    recordValue(notification.author);
+  const directReaction = typeof notification.reaction === "string" ? notification.reaction : undefined;
+  const result = {
+    ...definedText("emoji", firstText(
+      stringField(reaction ?? notification, "emoji"),
+      stringField(reaction ?? notification, "emojiName"),
+      stringField(notification, "emoji"),
+      directReaction,
+    )),
+    ...definedText("name", firstText(
+      stringField(reaction ?? notification, "name"),
+      stringField(reaction ?? notification, "label"),
+      stringField(notification, "reactionName"),
+    )),
+    ...definedText("actorName", stringField(actor ?? notification, "name") ?? stringField(notification, "actorName")),
+  };
+
+  return Object.keys(result).length ? result : undefined;
+}
+
 function definedIssue(
   issue: LinearInboxNotificationWebhook["issue"] | undefined,
 ): Pick<LinearInboxNotificationWebhook, "issue"> | Record<string, never> {
@@ -944,6 +993,12 @@ function definedComment(
   comment: LinearInboxNotificationWebhook["comment"] | undefined,
 ): Pick<LinearInboxNotificationWebhook, "comment"> | Record<string, never> {
   return comment ? { comment } : {};
+}
+
+function definedReaction(
+  reaction: LinearInboxNotificationWebhook["reaction"] | undefined,
+): Pick<LinearInboxNotificationWebhook, "reaction"> | Record<string, never> {
+  return reaction ? { reaction } : {};
 }
 
 function recordValue(value: unknown): Record<string, unknown> | undefined {

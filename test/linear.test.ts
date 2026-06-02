@@ -193,6 +193,60 @@ describe("Linear webhook handling", () => {
     expect(formatLinearInboxNotificationWebhookEvent(notification!)).toContain("Can you include this detail");
   });
 
+  test("recognizes Linear inbox notification reaction context", () => {
+    const notification = getLinearInboxNotificationWebhook(
+      parseLinearAgentEvent(
+        JSON.stringify({
+          type: "AppUserNotification",
+          action: "issueCommentReaction",
+          appUserId: "app-user-1",
+          notification: {
+            issue: {
+              id: "issue-1",
+              identifier: "OSS-273",
+              title: "Preserve reaction context",
+            },
+            comment: {
+              id: "comment-1",
+              body: "I pushed the fix.",
+              user: { name: "Tetherbox" },
+            },
+            reaction: {
+              emoji: "thumbsup",
+              name: "+1",
+              user: { name: "Luca" },
+            },
+          },
+        }),
+      ),
+    );
+
+    expect(notification).toEqual({
+      type: "AppUserNotification",
+      action: "issueCommentReaction",
+      appUserId: "app-user-1",
+      issue: {
+        id: "issue-1",
+        identifier: "OSS-273",
+        title: "Preserve reaction context",
+      },
+      comment: {
+        id: "comment-1",
+        body: "I pushed the fix.",
+        authorName: "Tetherbox",
+      },
+      reaction: {
+        emoji: "thumbsup",
+        name: "+1",
+        actorName: "Luca",
+      },
+    });
+    expect(formatLinearInboxNotificationWebhookEvent(notification!)).toContain("issueCommentReaction");
+    expect(formatLinearInboxNotificationWebhookEvent(notification!)).toContain("OSS-273");
+    expect(formatLinearInboxNotificationWebhookEvent(notification!)).toContain("thumbsup");
+    expect(formatLinearInboxNotificationWebhookEvent(notification!)).toContain("Luca");
+  });
+
   test("rejects malformed Linear webhook payloads", () => {
     expect(() => parseLinearAgentEvent("{not-json")).toThrow("Invalid Linear webhook JSON");
     expect(() => parseLinearAgentEvent("[]")).toThrow("Linear webhook payload must be a JSON object");
