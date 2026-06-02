@@ -24,6 +24,10 @@ export async function loadConfig(path: string): Promise<BridgeConfig> {
   return {
     ...parsed,
     state: parsed.state ?? { path: "state/daemon.sqlite" },
+    queue: {
+      concurrency: parsed.queue?.concurrency ?? 1,
+      shutdownGraceMs: parsed.queue?.shutdownGraceMs ?? 30_000,
+    },
     policies: parsed.policies ?? [],
   } as BridgeConfig;
 }

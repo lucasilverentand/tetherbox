@@ -7,6 +7,10 @@
     "path": "state/daemon.sqlite",
     "worktreeRetentionDays": 7
   },
+  "queue": {
+    "concurrency": 1,
+    "shutdownGraceMs": 30000
+  },
   "linear": {
     "webhookSecretEnv": "LINEAR_WEBHOOK_SECRET",
     "apiKeyEnv": "LINEAR_API_KEY"

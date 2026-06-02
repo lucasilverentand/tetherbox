@@ -18,7 +18,13 @@ interface JobRow {
   policy_decision: JobRecord["policyDecision"];
   created_at: string;
   updated_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+  canceled_at: string | null;
   last_message: string;
+  retry_eligible: number;
+  retry_count: number;
+  failure_reason: string | null;
 }
 
 interface EventRow {
@@ -31,6 +37,12 @@ interface EventRow {
 
 interface MetadataRow {
   value: string;
+}
+
+export interface JobUpdateOptions {
+  retryEligible?: boolean;
+  incrementRetryCount?: boolean;
+  failureReason?: string;
 }
 
 export class StateStore {
@@ -52,7 +64,7 @@ export class StateStore {
     this.db = undefined;
   }
 
-  snapshot(): DaemonState {
+  snapshot(queue?: DaemonState["queue"]): DaemonState {
     const db = this.requireDb();
     const startedAt = this.getMetadata("started_at");
     const jobs = db
@@ -64,7 +76,7 @@ export class StateStore {
       .all()
       .map((row) => eventFromRow(row as EventRow));
 
-    return { startedAt, jobs, events };
+    return { startedAt, queue, jobs, events };
   }
 
   syncRepoMappings(repos: RepoMapping[]): void {
@@ -112,6 +124,8 @@ export class StateStore {
       createdAt: now,
       updatedAt: now,
       lastMessage: "Queued",
+      retryEligible: false,
+      retryCount: 0,
     };
 
     db.transaction(() => {
@@ -139,8 +153,8 @@ export class StateStore {
       db.query(
         `insert into jobs (
           id, session_id, status, repo, issue_identifier, issue_title, policy_rule,
-          policy_decision, created_at, updated_at, last_message
-        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          policy_decision, created_at, updated_at, last_message, retry_eligible, retry_count
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         on conflict(id) do update set
           status = excluded.status,
           repo = excluded.repo,
@@ -149,7 +163,13 @@ export class StateStore {
           policy_rule = excluded.policy_rule,
           policy_decision = excluded.policy_decision,
           updated_at = excluded.updated_at,
-          last_message = excluded.last_message`,
+          last_message = excluded.last_message,
+          retry_eligible = excluded.retry_eligible,
+          retry_count = excluded.retry_count,
+          failure_reason = null,
+          started_at = null,
+          completed_at = null,
+          canceled_at = null`,
       ).run(
         record.id,
         record.sessionId,
@@ -162,6 +182,8 @@ export class StateStore {
         record.createdAt,
         record.updatedAt,
         record.lastMessage,
+        0,
+        0,
       );
       this.insertEvent("info", `Queued job for ${record.repo}`, record.id, now);
     })();
@@ -169,12 +191,42 @@ export class StateStore {
     return record;
   }
 
-  async updateJob(id: string, status: JobStatus, lastMessage: string): Promise<void> {
+  async updateJob(id: string, status: JobStatus, lastMessage: string, options: JobUpdateOptions = {}): Promise<void> {
     const db = this.requireDb();
     const now = new Date().toISOString();
+    const startedAt = status === "running" ? now : null;
+    const completedAt = status === "completed" || status === "denied" || status === "waiting_approval" ? now : null;
+    const canceledAt = status === "canceled" ? now : null;
+    const retryEligible = options.retryEligible === undefined ? null : Number(options.retryEligible);
+    const retryIncrement = options.incrementRetryCount ? 1 : 0;
+    const failureReason = options.failureReason ?? null;
     const result = db
-      .query("update jobs set status = ?, last_message = ?, updated_at = ? where id = ?")
-      .run(status, lastMessage, now, id);
+      .query(
+        `update jobs set
+          status = ?,
+          last_message = ?,
+          updated_at = ?,
+          started_at = coalesce(started_at, ?),
+          completed_at = coalesce(completed_at, ?),
+          canceled_at = coalesce(canceled_at, ?),
+          retry_eligible = coalesce(?, retry_eligible),
+          retry_count = retry_count + ?,
+          failure_reason = case when ? is not null then ? else failure_reason end
+        where id = ?`,
+      )
+      .run(
+        status,
+        lastMessage,
+        now,
+        startedAt,
+        completedAt,
+        canceledAt,
+        retryEligible,
+        retryIncrement,
+        failureReason,
+        failureReason,
+        id,
+      );
 
     if (result.changes === 0) {
       return;
@@ -183,7 +235,7 @@ export class StateStore {
     db.query(
       `update sessions
        set status = case
-         when ? in ('completed', 'failed', 'denied') then ?
+         when ? in ('completed', 'failed', 'denied', 'canceled') then ?
          else status
        end,
        updated_at = ?
@@ -254,7 +306,13 @@ export class StateStore {
         policy_decision text not null,
         created_at text not null,
         updated_at text not null,
-        last_message text not null
+        started_at text,
+        completed_at text,
+        canceled_at text,
+        last_message text not null,
+        retry_eligible integer not null default 0,
+        retry_count integer not null default 0,
+        failure_reason text
       );
 
       create table if not exists job_events (
@@ -344,7 +402,13 @@ function jobFromRow(row: JobRow): JobRecord {
     policyDecision: row.policy_decision,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    startedAt: row.started_at ?? undefined,
+    completedAt: row.completed_at ?? undefined,
+    canceledAt: row.canceled_at ?? undefined,
     lastMessage: row.last_message,
+    retryEligible: Boolean(row.retry_eligible),
+    retryCount: row.retry_count,
+    failureReason: row.failure_reason ?? undefined,
   };
 }
 
