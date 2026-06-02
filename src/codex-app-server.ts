@@ -138,13 +138,19 @@ export class CodexAppServerClient {
       this.activeTurn = { resolve, reject };
     });
 
-    await this.request("turn/start", {
-      threadId: thread,
-      input: [{ type: "text", text: options.input }],
-      cwd: options.cwd,
-      sandbox: options.sandbox,
-      model: options.model,
-    });
+    try {
+      await this.request("turn/start", {
+        threadId: thread,
+        input: [{ type: "text", text: options.input }],
+        cwd: options.cwd,
+        sandbox: options.sandbox,
+        model: options.model,
+      });
+    } catch (error) {
+      this.activeTurn = undefined;
+      this.activeNotificationHandler = undefined;
+      throw error;
+    }
 
     try {
       await withTimeout(

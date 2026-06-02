@@ -158,3 +158,21 @@ Example service definitions live in `examples/`:
 - `tetherbox.service` for Linux `systemd --user`.
 
 Run the service as the same user that has Codex, GitHub, Git, and local repo access. Keep secrets in the service manager's environment mechanism or in a local env file with restrictive file permissions.
+
+## Local Integration Harness
+
+Run the local integration harness with:
+
+```bash
+bun test test/integration-harness.test.ts
+```
+
+The harness does not call real Linear, real Codex, or GitHub. It signs fake Linear webhook payloads, runs the real Tetherbox request handler and job queue, creates temporary Git repositories, and starts a fake `codex app-server` executable over stdio.
+
+Covered paths:
+
+- Webhook intake to queued local job.
+- Successful App Server turn completion.
+- App Server request failure.
+- Approval-required jobs waiting before Codex starts.
+- PR-disabled completion when Codex leaves the worktree unchanged.
