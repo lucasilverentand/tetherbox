@@ -400,7 +400,7 @@ async function intakeLinearWebhook(options: LinearWebhookIntakeOptions): Promise
   }
 
   await safeUpdateLinearAgentSession(config, state, sessionId, {
-    ...(externalUrl ? { externalUrls: [externalUrl] } : {}),
+    ...(externalUrl ? { addedExternalUrls: [externalUrl] } : {}),
     plan: [
       { content: "Acknowledge Linear session", status: "completed" },
       { content: "Route Linear context to a local repository", status: "inProgress" },
@@ -423,7 +423,7 @@ async function intakeLinearWebhook(options: LinearWebhookIntakeOptions): Promise
     const job: RoutedJob = { id: jobId, sessionId, prompt, issue, repo, policy };
     await state.createJob(job);
     await safeUpdateLinearAgentSession(config, state, sessionId, {
-      ...(externalUrl ? { externalUrls: [externalUrl] } : {}),
+      ...(externalUrl ? { addedExternalUrls: [externalUrl] } : {}),
       plan: [
         { content: "Acknowledge Linear session", status: "completed" },
         { content: "Route Linear context to a local repository", status: "completed" },

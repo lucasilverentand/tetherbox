@@ -381,7 +381,7 @@ async function updateExternalUrls(
   }
 
   try {
-    await updateLinearAgentSession(config, job.sessionId, { externalUrls: urls }, state);
+    await updateLinearAgentSession(config, job.sessionId, { addedExternalUrls: urls }, state);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to update Linear external URLs";
     await state.addEvent("warn", message, job.id, "linear");
