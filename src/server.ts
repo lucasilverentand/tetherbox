@@ -1,6 +1,15 @@
 import { loadConfig, getRequiredEnv } from "./config";
 import { assertSupportedCodexCli } from "./codex-version";
-import { getIssueContext, getPrompt, getSessionId, parseLinearAgentEvent, verifyLinearSignature } from "./linear";
+import {
+  getIssueContext,
+  getPrompt,
+  getSessionId,
+  parseLinearAgentEvent,
+  postLinearActivity,
+  statusExternalUrl,
+  updateLinearAgentSession,
+  verifyLinearSignature,
+} from "./linear";
 import { applyPolicy } from "./policy";
 import { routeRepo } from "./repo-router";
 import { runJob } from "./job-runner";
@@ -61,6 +70,23 @@ export async function serve(configPath: string): Promise<void> {
 
         const job = { id: createJobId(sessionId), sessionId, prompt, issue, repo, policy };
         await state.createJob(job);
+        const externalUrl = statusExternalUrl(config, job.id);
+        void updateLinearAgentSession(config, sessionId, {
+          ...(externalUrl ? { externalUrls: [externalUrl] } : {}),
+          plan: [
+            { content: "Route Linear context to a local repository", status: "completed" },
+            { content: "Run Codex locally in an isolated worktree", status: "pending" },
+            { content: "Report the result back to Linear", status: "pending" },
+          ],
+        }).catch((error) => {
+          console.error("Failed to update Linear agent session", error);
+        });
+        void postLinearActivity(config, sessionId, {
+          type: "thought",
+          body: `Queued local Tetherbox job ${job.id} for ${repo.github}.`,
+        }).catch((error) => {
+          console.error("Failed to post Linear activity", error);
+        });
         queue.enqueue(job);
 
         return Response.json({ ok: true, queued: true, sessionId, jobId: job.id });
