@@ -96,6 +96,7 @@ Set `LINEAR_API_KEY` (or the env var named by `linear.apiKeyEnv`) to the app act
 
 When a webhook includes an issue ID, Tetherbox asks Linear's repository suggestion API to rank the configured candidate repos using the issue, session, guidance, and Linear context. Explicit repo mentions still win; low-confidence or unavailable suggestions fall back to the static team mapping. Tune the threshold with `linear.repositorySuggestionMinConfidence`.
 Follow-up `prompted` Agent Session events reuse the Codex thread ID stored for that Linear session, so user replies continue the same local Codex conversation.
+When Tetherbox opens or updates a GitHub pull request, it updates the Linear Agent Session `externalUrls` with the PR URL, plus the local Tetherbox job URL when `server.publicUrl` is configured.
 
 For OAuth app installation, set `LINEAR_CLIENT_ID` and `LINEAR_CLIENT_SECRET` using the env var names configured by `linear.oauthClientIdEnv` and `linear.oauthClientSecretEnv`, then open:
 

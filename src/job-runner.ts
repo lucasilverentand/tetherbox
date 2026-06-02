@@ -1,6 +1,13 @@
 import { CodexAppServerClient } from "./codex-app-server";
 import { JobCanceledError, type JobQueueResult } from "./job-queue";
-import { postLinearActivity, updateLinearAgentSession, type LinearActivityContent, type LinearPlanStep } from "./linear";
+import {
+  postLinearActivity,
+  statusExternalUrl,
+  updateLinearAgentSession,
+  type LinearActivityContent,
+  type LinearExternalUrl,
+  type LinearPlanStep,
+} from "./linear";
 import {
   finalizeSuccessfulRun,
   ValidationFailedError,
@@ -150,6 +157,7 @@ export async function runJob(
         parameter: job.repo.github,
         result: pullRequest.url,
       });
+      await updateExternalUrls(config, state, job, pullRequest);
       if (pullRequest.number) {
         const checks = await (options.watchChecks ?? watchPullRequestChecks)(
           job.repo.github,
@@ -314,6 +322,29 @@ async function updatePlan(
     await updateLinearAgentSession(config, job.sessionId, { plan }, state);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to update Linear agent session";
+    await state.addEvent("warn", message, job.id, "linear");
+  }
+}
+
+async function updateExternalUrls(
+  config: BridgeConfig,
+  state: StateStore,
+  job: RoutedJob,
+  pullRequest: PullRequestResult,
+): Promise<void> {
+  const urls = [
+    statusExternalUrl(config, job.id),
+    pullRequest.url ? { label: "GitHub pull request", url: pullRequest.url } : undefined,
+  ].filter(Boolean) as LinearExternalUrl[];
+
+  if (!urls.length) {
+    return;
+  }
+
+  try {
+    await updateLinearAgentSession(config, job.sessionId, { externalUrls: urls }, state);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Failed to update Linear external URLs";
     await state.addEvent("warn", message, job.id, "linear");
   }
 }
