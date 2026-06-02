@@ -81,6 +81,12 @@ export interface LinearInboxNotificationWebhook {
     statusType?: string;
     statusName?: string;
   };
+  comment?: {
+    id?: string;
+    body?: string;
+    url?: string;
+    authorName?: string;
+  };
 }
 
 export type LinearApprovalDecision = "approve" | "deny";
@@ -210,6 +216,7 @@ export function getLinearInboxNotificationWebhook(event: LinearAgentSessionEvent
     action: event.action || "unknown",
     ...(event.appUserId ? { appUserId: event.appUserId } : {}),
     ...definedIssue(extractNotificationIssue(event.notification)),
+    ...definedComment(extractNotificationComment(event.notification)),
   };
 }
 
@@ -221,9 +228,16 @@ export function formatLinearInboxNotificationWebhookEvent(event: LinearInboxNoti
     event.issue?.id && !event.issue.identifier ? event.issue.id : undefined,
     event.issue?.statusName ? `status: ${event.issue.statusName}` : undefined,
   ].filter(Boolean);
+  const commentParts = [
+    event.comment?.authorName,
+    event.comment?.body ? compactText(event.comment.body, 180) : undefined,
+    event.comment?.url,
+    event.comment?.id && !event.comment.url ? event.comment.id : undefined,
+  ].filter(Boolean);
   return [
     `Linear app-user notification: ${event.action}`,
     issueParts.length ? `issue: ${issueParts.join(" / ")}` : undefined,
+    commentParts.length ? `comment: ${commentParts.join(" / ")}` : undefined,
   ]
     .filter(Boolean)
     .join("; ");
@@ -864,10 +878,44 @@ function extractNotificationIssue(value: unknown): LinearInboxNotificationWebhoo
   return Object.keys(result).length ? result : undefined;
 }
 
+function extractNotificationComment(value: unknown): LinearInboxNotificationWebhook["comment"] | undefined {
+  const notification = recordValue(value);
+  if (!notification) {
+    return undefined;
+  }
+
+  const comment = recordValue(notification.comment) ?? recordValue(notification.issueComment);
+  const author =
+    recordValue(comment?.user) ??
+    recordValue(comment?.author) ??
+    recordValue(comment?.creator) ??
+    recordValue(notification.user) ??
+    recordValue(notification.author);
+  const result = {
+    ...definedText("id", stringField(comment ?? notification, "id") ?? stringField(notification, "commentId")),
+    ...definedText("body", firstText(
+      stringField(comment ?? notification, "body"),
+      stringField(comment ?? notification, "text"),
+      stringField(notification, "commentBody"),
+      stringField(notification, "commentText"),
+    )),
+    ...definedText("url", stringField(comment ?? notification, "url") ?? stringField(notification, "commentUrl")),
+    ...definedText("authorName", stringField(author ?? notification, "name") ?? stringField(notification, "authorName")),
+  };
+
+  return Object.keys(result).length ? result : undefined;
+}
+
 function definedIssue(
   issue: LinearInboxNotificationWebhook["issue"] | undefined,
 ): Pick<LinearInboxNotificationWebhook, "issue"> | Record<string, never> {
   return issue ? { issue } : {};
+}
+
+function definedComment(
+  comment: LinearInboxNotificationWebhook["comment"] | undefined,
+): Pick<LinearInboxNotificationWebhook, "comment"> | Record<string, never> {
+  return comment ? { comment } : {};
 }
 
 function recordValue(value: unknown): Record<string, unknown> | undefined {
@@ -876,6 +924,14 @@ function recordValue(value: unknown): Record<string, unknown> | undefined {
 
 function definedText<K extends string>(key: K, value: string | undefined): Record<K, string> | Record<string, never> {
   return value ? { [key]: value } as Record<K, string> : {};
+}
+
+function compactText(value: string, maxLength: number): string {
+  const compacted = value.replace(/\s+/g, " ").trim();
+  if (compacted.length <= maxLength) {
+    return compacted;
+  }
+  return `${compacted.slice(0, Math.max(0, maxLength - 3)).trimEnd()}...`;
 }
 
 function formatComment(comment: NonNullable<LinearAgentSessionEvent["comment"]>): string {

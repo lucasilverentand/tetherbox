@@ -332,7 +332,34 @@ async function handleLinearInboxNotificationWebhook(
     }
   }
 
+  if (shouldAttachLinearInboxNotificationToActiveJobs(event)) {
+    await attachLinearInboxNotificationToActiveJobs(state, event);
+  }
+
   return [];
+}
+
+function shouldAttachLinearInboxNotificationToActiveJobs(event: LinearInboxNotificationWebhook): boolean {
+  return event.action === "issueMention" || event.action === "issueCommentMention" || event.action === "issueNewComment";
+}
+
+async function attachLinearInboxNotificationToActiveJobs(
+  state: StateStore,
+  event: LinearInboxNotificationWebhook,
+): Promise<void> {
+  if (!event.issue) {
+    return;
+  }
+
+  const activeJobs = state.listActiveJobsForIssue(event.issue);
+  if (!activeJobs.length) {
+    return;
+  }
+
+  const message = formatLinearInboxNotificationWebhookEvent(event);
+  for (const job of activeJobs) {
+    await state.addEvent("info", message, job.id, "linear");
+  }
 }
 
 function terminalLinearIssueStatusType(statusType: string | undefined): "completed" | "canceled" | undefined {
