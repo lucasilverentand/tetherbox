@@ -462,6 +462,7 @@ export async function listLinearAgentSessionActivities(
   const pageSize = Math.max(1, Math.min(first, limit));
   const activities: LinearAgentSessionActivity[] = [];
   let after: string | undefined;
+  const seenCursors = new Set<string>();
 
   while (activities.length < limit) {
     const payload = await linearGraphql<{
@@ -537,10 +538,15 @@ export async function listLinearAgentSessionActivities(
     }
 
     const pageInfo = connection?.pageInfo;
-    if (pageInfo?.hasNextPage !== true || typeof pageInfo.endCursor !== "string" || pageInfo.endCursor.length === 0) {
+    const nextCursor = pageInfo?.endCursor;
+    if (pageInfo?.hasNextPage !== true || typeof nextCursor !== "string" || nextCursor.length === 0) {
       break;
     }
-    after = pageInfo.endCursor;
+    if (nextCursor === after || seenCursors.has(nextCursor)) {
+      break;
+    }
+    seenCursors.add(nextCursor);
+    after = nextCursor;
   }
 
   return activities.toSorted((left, right) => (left.updatedAt ?? "").localeCompare(right.updatedAt ?? ""));
