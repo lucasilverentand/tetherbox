@@ -19,6 +19,7 @@
     "webhookMaxAgeMs": 60000,
     "apiKeyEnv": "LINEAR_API_KEY",
     "repositorySuggestionMinConfidence": 0.2,
+    "reviewStateName": "In Review",
     "oauthClientIdEnv": "LINEAR_CLIENT_ID",
     "oauthClientSecretEnv": "LINEAR_CLIENT_SECRET",
     "oauthScopes": ["read", "write", "app:assignable", "app:mentionable"]

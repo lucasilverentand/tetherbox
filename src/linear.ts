@@ -40,6 +40,12 @@ export interface LinearIssueLifecycleResult {
   skippedReason?: "missing_issue" | "missing_token" | "missing_team" | "no_started_state" | "already_current";
 }
 
+export interface LinearIssueReviewStateResult {
+  issueId?: string;
+  movedToState?: string;
+  skippedReason?: "missing_issue" | "missing_token" | "missing_team" | "missing_review_state" | "already_current";
+}
+
 export interface LinearAgentSessionActivity {
   type: "thought" | "elicitation" | "action" | "response" | "error" | "prompt";
   updatedAt?: string;
@@ -519,6 +525,45 @@ export async function syncLinearIssueForAgentSession(
   return result;
 }
 
+export async function moveLinearIssueToReviewState(
+  config: BridgeConfig,
+  issue: LinearIssueContext,
+  tokenStore?: LinearTokenStore,
+): Promise<LinearIssueReviewStateResult> {
+  const issueId = issue.id ?? issue.identifier;
+  if (!issueId) {
+    return { skippedReason: "missing_issue" };
+  }
+
+  const token = await getLinearAccessToken(config, tokenStore);
+  if (!token) {
+    logLinearFallback("issueReviewStateSync", { issueId, stateName: reviewStateName(config) });
+    return { issueId, skippedReason: "missing_token" };
+  }
+
+  const current = await fetchLinearIssueForLifecycle(token, issueId);
+  if (!current) {
+    return { issueId, skippedReason: "missing_issue" };
+  }
+
+  const result: LinearIssueReviewStateResult = { issueId: current.identifier ?? current.id };
+  const targetStateName = reviewStateName(config);
+  if (current.state?.name.toLowerCase() === targetStateName.toLowerCase()) {
+    return { ...result, skippedReason: "already_current" };
+  }
+  if (!current.team?.id) {
+    return { ...result, skippedReason: "missing_team" };
+  }
+
+  const targetState = await fetchTeamStateByName(token, current.team.id, targetStateName);
+  if (!targetState) {
+    return { ...result, skippedReason: "missing_review_state" };
+  }
+
+  await updateLinearIssue(token, current.id, { stateId: targetState.id });
+  return { ...result, movedToState: targetState.name };
+}
+
 export function buildLinearOAuthAuthorizationUrl(
   config: BridgeConfig,
   stateStore: LinearOAuthStateStore,
@@ -722,6 +767,37 @@ async function fetchFirstStartedState(
   return data.team?.states?.nodes?.toSorted((left, right) => left.position - right.position)[0];
 }
 
+async function fetchTeamStateByName(
+  token: string,
+  teamId: string,
+  stateName: string,
+): Promise<{ id: string; name: string; position: number } | undefined> {
+  const data = await linearGraphql<{
+    team?: {
+      states?: {
+        nodes?: Array<{ id: string; name: string; position: number }>;
+      };
+    };
+  }>(token, {
+    query: `query TetherboxTeamStates($teamId: String!) {
+      team(id: $teamId) {
+        states {
+          nodes {
+            id
+            name
+            position
+          }
+        }
+      }
+    }`,
+    variables: { teamId },
+  });
+
+  return data.team?.states?.nodes
+    ?.toSorted((left, right) => left.position - right.position)
+    .find((state) => state.name.toLowerCase() === stateName.toLowerCase());
+}
+
 async function updateLinearIssue(
   token: string,
   issueId: string,
@@ -755,6 +831,10 @@ function linearActivityInput(agentSessionId: string, activity: LinearActivityCon
 
 function firstText(...values: Array<string | undefined>): string {
   return values.find((value) => value?.trim()) ?? "";
+}
+
+function reviewStateName(config: BridgeConfig): string {
+  return config.linear.reviewStateName ?? "In Review";
 }
 
 function isString(value: unknown): value is string {

@@ -1,6 +1,7 @@
 import { CodexAppServerClient } from "./codex-app-server";
 import { JobCanceledError, type JobQueueResult } from "./job-queue";
 import {
+  moveLinearIssueToReviewState,
   postLinearActivity,
   statusExternalUrl,
   updateLinearAgentSession,
@@ -160,6 +161,7 @@ export async function runJob(
         result: pullRequest.url,
       });
       await updateExternalUrls(config, state, job, pullRequest);
+      await updateIssueReviewState(config, state, job);
       if (pullRequest.number) {
         const checks = await (options.watchChecks ?? watchPullRequestChecks)(
           job.repo.github,
@@ -391,6 +393,35 @@ async function updateExternalUrls(
     await updateLinearAgentSession(config, job.sessionId, { addedExternalUrls: urls }, state);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to update Linear external URLs";
+    await state.addEvent("warn", message, job.id, "linear");
+  }
+}
+
+async function updateIssueReviewState(config: BridgeConfig, state: StateStore, job: RoutedJob): Promise<void> {
+  try {
+    const result = await moveLinearIssueToReviewState(config, job.issue, state);
+    const issueId = result.issueId ?? job.issue.identifier ?? job.issue.id ?? "unknown";
+    if (result.movedToState) {
+      const message = `Moved Linear issue ${issueId} to ${result.movedToState}`;
+      await state.addEvent("info", message, job.id, "linear");
+      await postActivity(config, state, job, {
+        type: "action",
+        action: "Moved issue to review",
+        parameter: issueId,
+        result: result.movedToState,
+      });
+      return;
+    }
+    if (result.skippedReason) {
+      await state.addEvent(
+        "warn",
+        `Skipped Linear issue review transition for ${issueId}: ${result.skippedReason}`,
+        job.id,
+        "linear",
+      );
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Failed to move Linear issue to review";
     await state.addEvent("warn", message, job.id, "linear");
   }
 }

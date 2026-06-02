@@ -332,6 +332,124 @@ describe("runJob", () => {
       delete process.env.LINEAR_API_KEY;
     }
   });
+
+  test("moves the Linear issue to review after publishing a pull request", async () => {
+    process.env.LINEAR_API_KEY = "lin_test";
+    const calls: unknown[] = [];
+    const restore = mockFetchForReviewTransition(calls);
+    const state = new StateStore(await statePath());
+    const job = {
+      ...autoJob,
+      issue: { ...autoJob.issue, id: "issue-uuid", identifier: "OSS-263" },
+    };
+    await state.load();
+    await state.createJob(job);
+    const client = new FakeCodexClient();
+
+    try {
+      const result = await runJob(
+        {
+          ...config,
+          linear: { ...config.linear, apiKeyEnv: "LINEAR_API_KEY", reviewStateName: "Reviewing" },
+        },
+        job,
+        state,
+        {
+          createClient: () => client,
+          prepareWorktree: async () => worktree,
+          finalizeRun: async () => ({
+            status: "created",
+            url: "https://github.com/lucasilverentand/example/pull/12",
+            number: 12,
+          }),
+          watchChecks: async () => ({
+            status: "no_checks",
+            summary: "No GitHub checks were reported for the pull request.",
+            output: "no checks reported",
+          }),
+        },
+      );
+
+      expect(result).toEqual({
+        status: "completed",
+        message: "Codex turn completed",
+      });
+      expect(calls).toContainEqual(
+        expect.objectContaining({
+          body: expect.objectContaining({
+            variables: {
+              id: "issue-uuid",
+              input: {
+                stateId: "state-review",
+              },
+            },
+          }),
+        }),
+      );
+      expect(calls).toContainEqual(
+        expect.objectContaining({
+          body: expect.objectContaining({
+            variables: expect.objectContaining({
+              input: expect.objectContaining({
+                content: {
+                  type: "action",
+                  action: "Moved issue to review",
+                  parameter: "OSS-263",
+                  result: "Reviewing",
+                },
+              }),
+            }),
+          }),
+        }),
+      );
+      expect(state.snapshot().events).toContainEqual(
+        expect.objectContaining({
+          source: "linear",
+          level: "info",
+          jobId: "job-2",
+          message: "Moved Linear issue OSS-263 to Reviewing",
+        }),
+      );
+    } finally {
+      restore();
+      state.close();
+      delete process.env.LINEAR_API_KEY;
+    }
+  });
+
+  test("records skipped review transitions without Linear API access", async () => {
+    const state = new StateStore(await statePath());
+    const job = {
+      ...autoJob,
+      issue: { ...autoJob.issue, id: "issue-uuid", identifier: "OSS-263" },
+    };
+    await state.load();
+    await state.createJob(job);
+    const client = new FakeCodexClient();
+
+    const result = await runJob(config, job, state, {
+      createClient: () => client,
+      prepareWorktree: async () => worktree,
+      finalizeRun: async () => ({
+        status: "created",
+        url: "https://github.com/lucasilverentand/example/pull/12",
+      }),
+    });
+
+    expect(result).toEqual({
+      status: "completed",
+      message: "Codex turn completed",
+    });
+    expect(state.snapshot().events).toContainEqual(
+      expect.objectContaining({
+        source: "linear",
+        level: "warn",
+        jobId: "job-2",
+        message: "Skipped Linear issue review transition for issue-uuid: missing_token",
+      }),
+    );
+    state.close();
+  });
 });
 
 async function statePath(): Promise<string> {
@@ -420,6 +538,58 @@ function mockFetch(calls: unknown[]): () => void {
       body: JSON.parse(String(init?.body)),
     });
     return new Response(JSON.stringify({ data: { ok: true } }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  }) as typeof fetch;
+
+  return () => {
+    globalThis.fetch = original;
+  };
+}
+
+function mockFetchForReviewTransition(calls: unknown[]): () => void {
+  const original = globalThis.fetch;
+  globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body));
+    calls.push({
+      headers: init?.headers,
+      body,
+    });
+    const query = String(body.query);
+    if (query.includes("TetherboxIssueLifecycle")) {
+      return new Response(
+        JSON.stringify({
+          data: {
+            issue: {
+              id: "issue-uuid",
+              identifier: "OSS-263",
+              state: { id: "state-progress", name: "In Progress", type: "started" },
+              team: { id: "team-1" },
+            },
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    if (query.includes("TetherboxTeamStates")) {
+      return new Response(
+        JSON.stringify({
+          data: {
+            team: {
+              states: {
+                nodes: [
+                  { id: "state-progress", name: "In Progress", position: 1 },
+                  { id: "state-review", name: "Reviewing", position: 2 },
+                ],
+              },
+            },
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    return new Response(JSON.stringify({ data: { ok: true, issueUpdate: { success: true } } }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });

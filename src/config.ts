@@ -27,6 +27,7 @@ export async function loadConfig(path: string): Promise<BridgeConfig> {
     linear: {
       ...parsed.linear,
       webhookMaxAgeMs: parsed.linear.webhookMaxAgeMs ?? 60_000,
+      reviewStateName: parsed.linear.reviewStateName ?? "In Review",
     },
     queue: {
       concurrency: parsed.queue?.concurrency ?? 1,

@@ -23,6 +23,7 @@ export interface BridgeConfig {
     webhookMaxAgeMs?: number;
     apiKeyEnv?: string;
     repositorySuggestionMinConfidence?: number;
+    reviewStateName?: string;
     oauthClientIdEnv?: string;
     oauthClientSecretEnv?: string;
     oauthRedirectUri?: string;
