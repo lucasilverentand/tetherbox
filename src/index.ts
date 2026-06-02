@@ -15,7 +15,7 @@ async function main(): Promise<void> {
   const command = process.argv[2];
 
   if (command !== "serve" && command !== "daemon" && command !== "tui") {
-    console.error("Usage: local-linear-codex-bridge <daemon|serve|tui> [--config <path>] [--url <url>]");
+    console.error("Usage: tetherbox <daemon|serve|tui> [--config <path>] [--url <url>]");
     process.exit(1);
   }
 

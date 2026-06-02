@@ -1,0 +1,14 @@
+[Unit]
+Description=Tetherbox
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/src/tetherbox
+ExecStart=/usr/bin/env bun run src/index.ts daemon --config %h/.config/tetherbox/config.json
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

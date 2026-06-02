@@ -60,5 +60,5 @@ export async function serve(configPath: string): Promise<void> {
     },
   });
 
-  console.log(`local-linear-codex-bridge listening on http://${server.hostname}:${server.port}`);
+  console.log(`tetherbox listening on http://${server.hostname}:${server.port}`);
 }

@@ -3,7 +3,7 @@
 <plist version="1.0">
   <dict>
     <key>Label</key>
-    <string>dev.local-linear-codex-bridge</string>
+    <string>dev.tetherbox</string>
     <key>ProgramArguments</key>
     <array>
       <string>/usr/bin/env</string>
@@ -12,10 +12,10 @@
       <string>src/index.ts</string>
       <string>daemon</string>
       <string>--config</string>
-      <string>/Users/luca/.config/local-linear-codex-bridge/config.json</string>
+      <string>/Users/luca/.config/tetherbox/config.json</string>
     </array>
     <key>WorkingDirectory</key>
-    <string>/Volumes/DevDisk/Developer/lucasilverentand/local-linear-codex-bridge</string>
+    <string>/Volumes/DevDisk/Developer/lucasilverentand/tetherbox</string>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>

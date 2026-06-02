@@ -1,12 +1,12 @@
 {
-  "name": "local-linear-codex-bridge",
+  "name": "tetherbox",
   "version": "0.1.0",
   "description": "Run local Codex App Server work from Linear agent sessions.",
   "type": "module",
   "private": false,
   "license": "MIT",
   "bin": {
-    "local-linear-codex-bridge": "./src/index.ts"
+    "tetherbox": "./src/index.ts"
   },
   "scripts": {
     "start": "bun run src/index.ts daemon --config examples/config.json",

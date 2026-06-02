@@ -1,4 +1,4 @@
-# Local Linear Codex Bridge
+# Tetherbox
 
 Open-source bridge for delegating Linear agent sessions to Codex running locally on a Linux or macOS host.
 
@@ -57,8 +57,8 @@ Press `q` to quit.
 
 Example service definitions live in `examples/`:
 
-- `dev.local-linear-codex-bridge.plist` for macOS `launchd`.
-- `local-linear-codex-bridge.service` for Linux `systemd --user`.
+- `dev.tetherbox.plist` for macOS `launchd`.
+- `tetherbox.service` for Linux `systemd --user`.
 
 Run the daemon as the same user that owns Codex auth, GitHub auth, SSH keys, and local repository checkouts.
 

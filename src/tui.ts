@@ -35,7 +35,7 @@ export async function runTui(options: TuiOptions): Promise<void> {
 
 async function draw(options: TuiOptions): Promise<void> {
   process.stdout.write("\x1b[2J\x1b[H");
-  process.stdout.write("Local Linear Codex Bridge\n");
+  process.stdout.write("Tetherbox\n");
   process.stdout.write(`q: quit | refresh: ${options.intervalMs}ms\n\n`);
 
   try {
