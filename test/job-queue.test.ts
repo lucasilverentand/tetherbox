@@ -39,6 +39,73 @@ describe("JobQueue", () => {
     state.close();
   });
 
+  test("serializes jobs for the same Linear session", async () => {
+    const state = await loadedState();
+    const started: string[] = [];
+    const releases = new Map<string, () => void>();
+    const queue = new JobQueue({
+      concurrency: 2,
+      state,
+      execute: async (job) => {
+        started.push(job.id);
+        await new Promise<void>((resolve) => releases.set(job.id, resolve));
+        return { status: "completed", message: `${job.id} done` };
+      },
+    });
+    const first = jobFixture("job-1", "session-1");
+    const second = jobFixture("job-2", "session-1");
+    await state.createJob(first);
+    await state.createJob(second);
+
+    queue.enqueue(first);
+    queue.enqueue(second);
+    await waitFor(() => started.length === 1 && queue.stats().running === 1 && queue.stats().queued === 1);
+
+    expect(started).toEqual(["job-1"]);
+    releases.get("job-1")?.();
+    await waitFor(() => started.includes("job-2"));
+    releases.get("job-2")?.();
+    await waitFor(() => queue.stats().running === 0);
+
+    expect(state.snapshot().jobs.every((job) => job.status === "completed")).toBe(true);
+    state.close();
+  });
+
+  test("does not let same-session serialization block unrelated sessions", async () => {
+    const state = await loadedState();
+    const started: string[] = [];
+    const releases = new Map<string, () => void>();
+    const queue = new JobQueue({
+      concurrency: 2,
+      state,
+      execute: async (job) => {
+        started.push(job.id);
+        await new Promise<void>((resolve) => releases.set(job.id, resolve));
+        return { status: "completed", message: `${job.id} done` };
+      },
+    });
+    const first = jobFixture("job-1", "session-1");
+    const blockedSameSession = jobFixture("job-2", "session-1");
+    const unrelated = jobFixture("job-3", "session-2");
+    for (const job of [first, blockedSameSession, unrelated]) {
+      await state.createJob(job);
+      queue.enqueue(job);
+    }
+
+    await waitFor(() => started.length === 2);
+
+    expect(started).toEqual(["job-1", "job-3"]);
+    expect(queue.stats()).toMatchObject({ running: 2, queued: 1 });
+    releases.get("job-1")?.();
+    await waitFor(() => started.includes("job-2"));
+    releases.get("job-2")?.();
+    releases.get("job-3")?.();
+    await waitFor(() => queue.stats().running === 0);
+
+    expect(state.snapshot().jobs.every((job) => job.status === "completed")).toBe(true);
+    state.close();
+  });
+
   test("cancels queued jobs", async () => {
     const state = await loadedState();
     const queue = new JobQueue({
@@ -142,10 +209,10 @@ async function loadedState(): Promise<StateStore> {
   return state;
 }
 
-function jobFixture(id: string): RoutedJob {
+function jobFixture(id: string, sessionId = `session-${id}`): RoutedJob {
   return {
     id,
-    sessionId: `session-${id}`,
+    sessionId,
     prompt: "Fix it",
     issue: {
       identifier: id.toUpperCase(),

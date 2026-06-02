@@ -18,6 +18,7 @@ export interface ShutdownOptions {
 
 interface RunningJob {
   controller: AbortController;
+  sessionId: string;
   promise: Promise<void>;
 }
 
@@ -102,7 +103,11 @@ export class JobQueue {
 
   private pump(): void {
     while (this.running.size < this.options.concurrency) {
-      const job = this.pending.shift();
+      const nextIndex = this.nextRunnableJobIndex();
+      if (nextIndex === -1) {
+        return;
+      }
+      const [job] = this.pending.splice(nextIndex, 1);
       if (!job) {
         return;
       }
@@ -112,8 +117,13 @@ export class JobQueue {
         this.running.delete(job.id);
         this.pump();
       });
-      this.running.set(job.id, { controller, promise });
+      this.running.set(job.id, { controller, sessionId: job.sessionId, promise });
     }
+  }
+
+  private nextRunnableJobIndex(): number {
+    const runningSessions = new Set([...this.running.values()].map((job) => job.sessionId));
+    return this.pending.findIndex((job) => !runningSessions.has(job.sessionId));
   }
 
   private async run(job: RoutedJob, controller: AbortController): Promise<void> {
