@@ -352,7 +352,13 @@ async function handleLinearInboxNotificationWebhook(
 }
 
 function shouldAttachLinearInboxNotificationToActiveJobs(event: LinearInboxNotificationWebhook): boolean {
-  return event.action === "issueMention" || event.action === "issueCommentMention" || event.action === "issueNewComment";
+  return (
+    event.action === "issueMention" ||
+    event.action === "issueCommentMention" ||
+    event.action === "issueNewComment" ||
+    event.action === "issueEmojiReaction" ||
+    event.action === "issueCommentReaction"
+  );
 }
 
 async function attachLinearInboxNotificationToActiveJobs(

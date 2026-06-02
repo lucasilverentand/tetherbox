@@ -648,6 +648,82 @@ describe("server webhook handling", () => {
     }
   });
 
+  test("attaches Linear reaction notification context to matching active jobs", async () => {
+    const state = await loadedState();
+    const queue = new FakeQueue(state);
+    const queuedJob = jobFixture({
+      id: "job-queued",
+      sessionId: "sess_queued",
+      issue: { id: "issue-1", identifier: "OSS-273", title: "Preserve reaction context", labels: [] },
+    });
+    await state.createJob(queuedJob);
+    queue.jobs.push(queuedJob);
+    await state.createJob(jobFixture({
+      id: "job-running",
+      sessionId: "sess_running",
+      issue: { id: "issue-1", identifier: "OSS-273", title: "Preserve reaction context", labels: [] },
+    }));
+    await state.updateJob("job-running", "running", "Job started");
+    const handler = createRequestHandler({
+      config,
+      state,
+      queue,
+      webhookSecret: "secret",
+    });
+    const body = linearBody({
+      type: "AppUserNotification",
+      action: "issueCommentReaction",
+      appUserId: "app-user-1",
+      notification: {
+        issue: {
+          id: "issue-1",
+          identifier: "OSS-273",
+          title: "Preserve reaction context",
+        },
+        comment: {
+          id: "comment-1",
+          body: "Implemented in the PR.",
+          user: { name: "Tetherbox" },
+        },
+        reaction: {
+          emoji: "eyes",
+          user: { name: "Luca" },
+        },
+      },
+    });
+
+    try {
+      const response = await handler(
+        new Request("http://127.0.0.1:8787/webhooks/linear", {
+          method: "POST",
+          headers: { "Linear-Signature": signature(body, "secret") },
+          body,
+        }),
+      );
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        ok: true,
+        accepted: true,
+        eventType: "AppUserNotification",
+        action: "issueCommentReaction",
+        canceledJobIds: [],
+      });
+      expect(queue.jobs).toHaveLength(1);
+      expect(state.getJob("job-queued")?.status).toBe("queued");
+      expect(state.getJob("job-running")?.status).toBe("running");
+      const notificationEvents = state.snapshot().events.filter((event) => event.message.includes("issueCommentReaction"));
+      expect(notificationEvents).toHaveLength(3);
+      expect(notificationEvents.some((event) => event.jobId === undefined)).toBe(true);
+      expect(notificationEvents.some((event) => event.jobId === "job-queued")).toBe(true);
+      expect(notificationEvents.some((event) => event.jobId === "job-running")).toBe(true);
+      expect(notificationEvents.every((event) => event.message.includes("eyes"))).toBe(true);
+      expect(notificationEvents.every((event) => event.message.includes("Luca"))).toBe(true);
+    } finally {
+      state.close();
+    }
+  });
+
   test("keeps Linear mention notifications with no matching active job audit-only", async () => {
     const state = await loadedState();
     const queue = new FakeQueue(state);
@@ -700,6 +776,63 @@ describe("server webhook handling", () => {
         jobId: undefined,
         source: "linear",
         message: expect.stringContaining("This should only be a global audit event"),
+      });
+    } finally {
+      state.close();
+    }
+  });
+
+  test("keeps Linear reaction notifications with no matching active job audit-only", async () => {
+    const state = await loadedState();
+    const queue = new FakeQueue(state);
+    await state.createJob(jobFixture({
+      id: "job-completed",
+      sessionId: "sess_completed",
+      issue: { id: "issue-1", identifier: "OSS-273", title: "Preserve reaction context", labels: [] },
+    }));
+    await state.updateJob("job-completed", "completed", "Job completed");
+    const handler = createRequestHandler({
+      config,
+      state,
+      queue,
+      webhookSecret: "secret",
+    });
+    const body = linearBody({
+      type: "AppUserNotification",
+      action: "issueEmojiReaction",
+      appUserId: "app-user-1",
+      notification: {
+        issue: {
+          id: "issue-1",
+          identifier: "OSS-273",
+          title: "Preserve reaction context",
+        },
+        reaction: {
+          emoji: "rocket",
+          user: { name: "Luca" },
+        },
+      },
+    });
+
+    try {
+      const response = await handler(
+        new Request("http://127.0.0.1:8787/webhooks/linear", {
+          method: "POST",
+          headers: { "Linear-Signature": signature(body, "secret") },
+          body,
+        }),
+      );
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ canceledJobIds: [] });
+      expect(queue.jobs).toHaveLength(0);
+      expect(state.getJob("job-completed")?.status).toBe("completed");
+      const notificationEvents = state.snapshot().events.filter((event) => event.message.includes("issueEmojiReaction"));
+      expect(notificationEvents).toHaveLength(1);
+      expect(notificationEvents[0]).toMatchObject({
+        jobId: undefined,
+        source: "linear",
+        message: expect.stringContaining("rocket"),
       });
     } finally {
       state.close();
