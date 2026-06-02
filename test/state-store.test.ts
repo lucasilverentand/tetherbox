@@ -127,6 +127,39 @@ describe("StateStore", () => {
     reloaded.close();
   });
 
+  test("persists pull request metadata", async () => {
+    const path = await statePath();
+    const store = new StateStore(path);
+    await store.load();
+    await store.createJob(jobFixture());
+
+    store.savePullRequest({
+      jobId: "job-1",
+      githubRepo: "lucasilverentand/example",
+      branchName: "oss-1-fix-it",
+      prNumber: 42,
+      url: "https://github.com/lucasilverentand/example/pull/42",
+      status: "open",
+    });
+    store.close();
+
+    const db = new Database(path);
+    const row = db.query("select * from pull_requests where job_id = ?").get("job-1") as {
+      github_repo: string;
+      branch_name: string;
+      pr_number: number;
+      url: string;
+    } | null;
+    db.close();
+
+    expect(row).toMatchObject({
+      github_repo: "lucasilverentand/example",
+      branch_name: "oss-1-fix-it",
+      pr_number: 42,
+      url: "https://github.com/lucasilverentand/example/pull/42",
+    });
+  });
+
   test("syncs repo mappings durably", async () => {
     const path = await statePath();
     const repo: RepoMapping = {
