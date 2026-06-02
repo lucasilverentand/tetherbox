@@ -820,7 +820,10 @@ describe("server webhook handling", () => {
     const state = await loadedState();
     const queue = new FakeQueue(state);
     const handler = createRequestHandler({
-      config: { ...config, server: { ...config.server, operatorTokenEnv: "TETHERBOX_OPERATOR_TOKEN" } },
+      config: {
+        ...config,
+        server: { ...config.server, host: "0.0.0.0", operatorTokenEnv: "TETHERBOX_OPERATOR_TOKEN" },
+      },
       state,
       queue,
       webhookSecret: "secret",
@@ -840,6 +843,45 @@ describe("server webhook handling", () => {
 
       expect(rejected.status).toBe(401);
       expect(await accepted.json()).toEqual({ ok: true });
+    } finally {
+      delete process.env.TETHERBOX_OPERATOR_TOKEN;
+      state.close();
+    }
+  });
+
+  test("does not trust spoofed loopback hosts for public operator APIs", async () => {
+    const state = await loadedState();
+    const queue = new FakeQueue(state);
+    const handler = createRequestHandler({
+      config: {
+        ...config,
+        server: {
+          ...config.server,
+          host: "0.0.0.0",
+          operatorTokenEnv: "TETHERBOX_OPERATOR_TOKEN",
+        },
+      },
+      state,
+      queue,
+      webhookSecret: "secret",
+    });
+    await state.createJob(jobFixture());
+    await state.updateJob("job-1", "failed", "Codex failed", { retryEligible: true });
+    process.env.TETHERBOX_OPERATOR_TOKEN = "operator-secret";
+
+    try {
+      const rejected = await handler(new Request("http://localhost/api/jobs/job-1/retry", { method: "POST" }));
+      const accepted = await handler(
+        new Request("http://localhost/api/jobs/job-1/retry", {
+          method: "POST",
+          headers: { "X-Tetherbox-Operator-Token": "operator-secret" },
+        }),
+      );
+
+      expect(rejected.status).toBe(401);
+      expect(await rejected.json()).toEqual({ ok: false, reason: "operator_auth_required" });
+      expect(await accepted.json()).toEqual({ ok: true });
+      expect(queue.jobs).toHaveLength(1);
     } finally {
       delete process.env.TETHERBOX_OPERATOR_TOKEN;
       state.close();
