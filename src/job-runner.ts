@@ -82,9 +82,11 @@ export async function runJob(
       parameter: job.repo.github,
     });
     throwIfCanceled(options.signal);
-    await client.runTurn({
+    const existingThreadId = state.getSessionThreadId(job.sessionId);
+    const threadId = await client.runTurn({
       cwd: worktree.path,
       input: prompt,
+      threadId: existingThreadId,
       model: config.codex.model,
       sandbox: job.policy.sandbox,
       onNotification: (notification) => {
@@ -93,6 +95,9 @@ export async function runJob(
         }
       },
     });
+    if (!existingThreadId) {
+      await state.setSessionThreadId(job.sessionId, threadId, job.id);
+    }
     throwIfCanceled(options.signal);
     await updatePlan(config, state, job, [
       { content: "Route Linear context to a local repository", status: "completed" },

@@ -39,6 +39,10 @@ interface MetadataRow {
   value: string;
 }
 
+interface SessionThreadRow {
+  codex_thread_id: string | null;
+}
+
 export interface JobUpdateOptions {
   retryEligible?: boolean;
   incrementRetryCount?: boolean;
@@ -256,6 +260,24 @@ export class StateStore {
     }
 
     await this.addEvent("info", `Prepared worktree ${worktree.branchName}`, id);
+  }
+
+  getSessionThreadId(sessionId: string): string | undefined {
+    const row = this.requireDb()
+      .query("select codex_thread_id from sessions where id = ?")
+      .get(sessionId) as SessionThreadRow | null;
+    return row?.codex_thread_id ?? undefined;
+  }
+
+  async setSessionThreadId(sessionId: string, threadId: string, jobId?: string): Promise<void> {
+    const now = new Date().toISOString();
+    const result = this.requireDb()
+      .query("update sessions set codex_thread_id = ?, updated_at = ? where id = ?")
+      .run(threadId, now, sessionId);
+
+    if (result.changes > 0) {
+      await this.addEvent("info", `Linked Linear session to Codex thread ${threadId}`, jobId);
+    }
   }
 
   async addEvent(level: DaemonEvent["level"], message: string, jobId?: string): Promise<void> {
