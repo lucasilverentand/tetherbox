@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
   finalizeSuccessfulRun,
+  GitHubAuthenticationRequiredError,
+  isGitHubAuthenticationFailure,
   parsePullRequestCheckOutput,
   ValidationFailedError,
   watchPullRequestChecks,
@@ -193,6 +195,40 @@ describe("pull request automation", () => {
     expect(commits[1]?.kind === "run" ? commits[1].args.includes("-S") : true).toBe(false);
   });
 
+  test("classifies GitHub CLI authentication failures", async () => {
+    const runner = new FakeRunner([
+      { stdout: " M src/app.ts\n", stderr: "" },
+      { stdout: "", stderr: "" },
+      { stdout: "", stderr: "" },
+      { stdout: "", stderr: "" },
+    ]);
+    runner.shellResults.push({ stdout: "", stderr: "" });
+    runner.failRunCommand = "gh";
+    runner.failRun = "gh: To get started with GitHub CLI, please run: gh auth login";
+
+    await expect(finalizeSuccessfulRun(config, job, worktree, runner)).rejects.toBeInstanceOf(
+      GitHubAuthenticationRequiredError,
+    );
+    expect(isGitHubAuthenticationFailure({ stdout: "", stderr: "HTTP 401: Bad credentials" })).toBe(true);
+    expect(isGitHubAuthenticationFailure({ stdout: "", stderr: "repository not found" })).toBe(false);
+  });
+
+  test("classifies GitHub remote push authentication failures", async () => {
+    const runner = new FakeRunner([
+      { stdout: " M src/app.ts\n", stderr: "" },
+      { stdout: "", stderr: "" },
+      { stdout: "", stderr: "" },
+    ]);
+    runner.shellResults.push({ stdout: "", stderr: "" });
+    runner.failRunCommand = "git";
+    runner.failRunArgsIncludes = "push";
+    runner.failRun = "git@github.com: Permission denied (publickey).";
+
+    await expect(finalizeSuccessfulRun(config, job, worktree, runner)).rejects.toBeInstanceOf(
+      GitHubAuthenticationRequiredError,
+    );
+  });
+
   test("parses pull request check output", () => {
     expect(parsePullRequestCheckOutput("build\tpass\t0m10s\thttps://example.test").status).toBe("passed");
     expect(parsePullRequestCheckOutput("build\tfail\t0m10s\thttps://example.test").status).toBe("failed");
@@ -277,6 +313,8 @@ class FakeRunner implements CommandRunner {
   > = [];
   failShell = false;
   failRun?: string;
+  failRunCommand?: string;
+  failRunArgsIncludes?: string;
   failSignedCommit = false;
   existingFiles = new Set<string>();
   existingPullRequest?: { url?: string; number?: number };
@@ -296,7 +334,11 @@ class FakeRunner implements CommandRunner {
       this.failSignedCommit = false;
       throw new Error("signing failed");
     }
-    if (this.failRun) {
+    if (
+      this.failRun &&
+      (!this.failRunCommand || this.failRunCommand === command) &&
+      (!this.failRunArgsIncludes || args.includes(this.failRunArgsIncludes))
+    ) {
       throw new Error(this.failRun);
     }
     return this.next();

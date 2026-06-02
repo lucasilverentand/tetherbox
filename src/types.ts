@@ -37,6 +37,7 @@ export interface BridgeConfig {
   };
   git?: {
     signingKeyPath?: string;
+    githubAuthUrl?: string;
   };
   repos: RepoMapping[];
   policies: PolicyRule[];

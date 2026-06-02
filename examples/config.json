@@ -31,7 +31,8 @@
     "turnTimeoutMs": 1800000
   },
   "git": {
-    "signingKeyPath": "~/.ssh/codex_signing_key"
+    "signingKeyPath": "~/.ssh/codex_signing_key",
+    "githubAuthUrl": "https://github.com/login/device"
   },
   "repos": [
     {

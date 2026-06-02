@@ -5,11 +5,13 @@ import {
   statusExternalUrl,
   updateLinearAgentSession,
   type LinearActivityContent,
+  type LinearActivityInput,
   type LinearExternalUrl,
   type LinearPlanStep,
 } from "./linear";
 import {
   finalizeSuccessfulRun,
+  GitHubAuthenticationRequiredError,
   ValidationFailedError,
   watchPullRequestChecks,
   type PullRequestCheckResult,
@@ -203,6 +205,39 @@ export async function runJob(
       throw new JobCanceledError();
     }
 
+    if (error instanceof GitHubAuthenticationRequiredError) {
+      const approvalTimeoutMs = config.queue?.approvalTimeoutMs;
+      const expiresAt =
+        approvalTimeoutMs && approvalTimeoutMs > 0 ? new Date(Date.now() + approvalTimeoutMs).toISOString() : undefined;
+      state.createApproval(job.id, "Authenticate GitHub CLI and resume Tetherbox", expiresAt);
+      await state.addEvent("warn", "GitHub CLI authentication is required before publishing a pull request", job.id, "github");
+      await updatePlan(config, state, job, [
+        { content: "Route Linear context to a local repository", status: "completed" },
+        { content: "Prepare isolated Git worktree", status: "completed" },
+        { content: "Run Codex locally", status: "completed" },
+        { content: "Authenticate GitHub CLI", status: "inProgress" },
+        { content: "Report the result back to Linear", status: "pending" },
+      ]);
+      await postActivity(config, state, job, {
+        content: {
+          type: "elicitation",
+          body: [
+            "GitHub authentication is required before Tetherbox can publish the pull request.",
+            "Run `gh auth login` for the daemon user, then reply `approve` or `continue` here to retry.",
+            expiresAt ? `This resume prompt expires at ${expiresAt}.` : undefined,
+          ]
+            .filter(Boolean)
+            .join(" "),
+        },
+        signal: "auth",
+        signalMetadata: {
+          url: githubAuthUrl(config),
+          providerName: "GitHub",
+        },
+      });
+      return { status: "waiting_approval", message: "Waiting for GitHub authentication" };
+    }
+
     if (error instanceof ValidationFailedError) {
       await recordValidationResults(state, job, error.results);
       const failed = error.results.find((result) => result.status === "failed");
@@ -302,7 +337,7 @@ async function postActivity(
   config: BridgeConfig,
   state: StateStore,
   job: RoutedJob,
-  content: LinearActivityContent,
+  content: LinearActivityContent | LinearActivityInput,
 ): Promise<void> {
   try {
     await postLinearActivity(config, job.sessionId, content, state);
@@ -310,6 +345,10 @@ async function postActivity(
     const message = error instanceof Error ? error.message : "Failed to post Linear activity";
     await state.addEvent("warn", message, job.id, "linear");
   }
+}
+
+function githubAuthUrl(config: BridgeConfig): string {
+  return config.git?.githubAuthUrl ?? "https://github.com/login/device";
 }
 
 async function updatePlan(
