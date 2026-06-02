@@ -118,6 +118,33 @@ describe("server webhook handling", () => {
       expect(queue.jobs[0]?.prompt).toContain("Keep the fix minimal.");
       expect(queue.jobs[0]?.prompt).toContain("Earlier frozen prompt from Linear.");
       expect(state.snapshot().jobs[0]?.id).toBe(queue.jobs[0]?.id);
+      const sessionUpdates = fetchMock.calls.filter((call): call is { body: { variables: { id: string; input: unknown } } } => (
+        typeof call === "object"
+        && call !== null
+        && "body" in call
+        && typeof call.body === "object"
+        && call.body !== null
+        && "variables" in call.body
+        && typeof call.body.variables === "object"
+        && call.body.variables !== null
+        && "id" in call.body.variables
+        && call.body.variables.id === "sess_1"
+        && "input" in call.body.variables
+        && typeof call.body.variables.input === "object"
+        && call.body.variables.input !== null
+      ));
+      expect(sessionUpdates[0]?.body.variables.input).toMatchObject({
+        addedExternalUrls: [{
+          label: "Tetherbox job",
+          url: expect.stringMatching(/^https:\/\/bridge\.example\/api\/status#sess_1-[a-f0-9]{8}$/),
+        }],
+      });
+      expect(sessionUpdates[1]?.body.variables.input).toMatchObject({
+        addedExternalUrls: [{
+          label: "Tetherbox job",
+          url: expect.stringMatching(/^https:\/\/bridge\.example\/api\/status#sess_1-[a-f0-9]{8}$/),
+        }],
+      });
     } finally {
       fetchMock.restore();
       state.close();
@@ -975,19 +1002,34 @@ function signature(body: string, secret: string): string {
 }
 
 function mockDeferredFetch(): {
+  calls: unknown[];
   pending: Array<{ resolve: (value: Response) => void }>;
   restore: () => void;
   resolveNext: (body: unknown) => void;
 } {
   const original = globalThis.fetch;
+  const calls: unknown[] = [];
   const pending: Array<{ resolve: (value: Response) => void }> = [];
-  globalThis.fetch = (() => {
+  globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+    if (init?.body !== undefined) {
+      try {
+        calls.push({
+          headers: init.headers,
+          body: JSON.parse(String(init.body)),
+        });
+      } catch {
+        calls.push(init.body);
+      }
+    } else {
+      calls.push(input);
+    }
     return new Promise<Response>((resolve) => {
       pending.push({ resolve });
     });
   }) as typeof fetch;
 
   return {
+    calls,
     pending,
     restore: () => {
       globalThis.fetch = original;
