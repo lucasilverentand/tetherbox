@@ -1598,7 +1598,7 @@ describe("server webhook handling", () => {
       await waitFor(() => state.getJob("tetherbox-sess_stop")?.status === "canceled");
       await sleep(10);
       expect(fetchMock.pending).toHaveLength(0);
-      expect(linearSessionUpdateInputs(fetchMock.calls, "sess_idle")).toHaveLength(0);
+      expect(linearSessionUpdateInputs(fetchMock.calls, "sess_stop")).toHaveLength(0);
       expect(linearActivityInputs(fetchMock.calls)).toHaveLength(0);
       expect(queue.jobs).toHaveLength(0);
     } finally {
