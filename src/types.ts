@@ -22,6 +22,7 @@ export interface BridgeConfig {
     webhookSecretEnv: string;
     webhookMaxAgeMs?: number;
     apiTimeoutMs?: number;
+    agentActivityHistoryLimit?: number;
     apiKeyEnv?: string;
     repositorySuggestionMinConfidence?: number;
     reviewStateName?: string;

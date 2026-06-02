@@ -101,6 +101,7 @@ const LINEAR_GRAPHQL_URL = "https://api.linear.app/graphql";
 const LINEAR_AUTHORIZE_URL = "https://linear.app/oauth/authorize";
 const LINEAR_TOKEN_URL = "https://api.linear.app/oauth/token";
 const DEFAULT_OAUTH_SCOPES = ["read", "write", "app:assignable", "app:mentionable", "customer:read", "initiative:read"];
+const DEFAULT_AGENT_ACTIVITY_HISTORY_LIMIT = 100;
 
 export interface LinearTokenStore {
   getLinearInstallation(workspaceId?: string): LinearInstallationRecord | undefined;
@@ -453,62 +454,96 @@ export async function listLinearAgentSessionActivities(
     return [];
   }
 
-  const payload = await linearGraphql<{
-    agentSession?: {
-      activities?: {
-        edges?: Array<{
-          node?: {
-            updatedAt?: string;
-            content?: Record<string, unknown>;
+  const limit = Math.max(0, config.linear.agentActivityHistoryLimit ?? DEFAULT_AGENT_ACTIVITY_HISTORY_LIMIT);
+  if (limit === 0) {
+    return [];
+  }
+
+  const pageSize = Math.max(1, Math.min(first, limit));
+  const activities: LinearAgentSessionActivity[] = [];
+  let after: string | undefined;
+
+  while (activities.length < limit) {
+    const payload = await linearGraphql<{
+      agentSession?: {
+        activities?: {
+          edges?: Array<{
+            node?: {
+              updatedAt?: string;
+              content?: Record<string, unknown>;
+            };
+          }>;
+          pageInfo?: {
+            hasNextPage?: boolean;
+            endCursor?: string | null;
           };
-        }>;
+        };
       };
-    };
-  }>(token, config.linear.apiTimeoutMs, {
-    query: `query TetherboxAgentSessionActivities($id: String!, $first: Int!) {
-      agentSession(id: $id) {
-        activities(first: $first) {
-          edges {
-            node {
-              updatedAt
-              content {
-                __typename
-                ... on AgentActivityThoughtContent {
-                  body
-                }
-                ... on AgentActivityActionContent {
-                  action
-                  parameter
-                  result
-                }
-                ... on AgentActivityElicitationContent {
-                  body
-                }
-                ... on AgentActivityResponseContent {
-                  body
-                }
-                ... on AgentActivityErrorContent {
-                  body
-                }
-                ... on AgentActivityPromptContent {
-                  body
+    }>(token, config.linear.apiTimeoutMs, {
+      query: `query TetherboxAgentSessionActivities($id: String!, $first: Int!, $after: String) {
+        agentSession(id: $id) {
+          activities(first: $first, after: $after) {
+            edges {
+              node {
+                updatedAt
+                content {
+                  __typename
+                  ... on AgentActivityThoughtContent {
+                    body
+                  }
+                  ... on AgentActivityActionContent {
+                    action
+                    parameter
+                    result
+                  }
+                  ... on AgentActivityElicitationContent {
+                    body
+                  }
+                  ... on AgentActivityResponseContent {
+                    body
+                  }
+                  ... on AgentActivityErrorContent {
+                    body
+                  }
+                  ... on AgentActivityPromptContent {
+                    body
+                  }
                 }
               }
             }
+            pageInfo {
+              hasNextPage
+              endCursor
+            }
           }
         }
-      }
-    }`,
-    variables: {
-      id: agentSessionId,
-      first,
-    },
-  });
+      }`,
+      variables: {
+        id: agentSessionId,
+        first: Math.min(pageSize, limit - activities.length),
+        after: after ?? null,
+      },
+    });
 
-  return (payload.agentSession?.activities?.edges ?? [])
-    .map((edge) => activityFromNode(edge.node))
-    .filter((activity): activity is LinearAgentSessionActivity => activity !== undefined)
-    .toSorted((left, right) => (left.updatedAt ?? "").localeCompare(right.updatedAt ?? ""));
+    const connection = payload.agentSession?.activities;
+    for (const edge of connection?.edges ?? []) {
+      const activity = activityFromNode(edge.node);
+      if (activity) {
+        activities.push(activity);
+      }
+      if (activities.length >= limit) {
+        break;
+      }
+    }
+
+    const pageInfo = connection?.pageInfo;
+    if (pageInfo?.hasNextPage !== true || typeof pageInfo.endCursor !== "string" || pageInfo.endCursor.length === 0) {
+      break;
+    }
+    after = pageInfo.endCursor;
+  }
+
+  return activities.toSorted((left, right) => (left.updatedAt ?? "").localeCompare(right.updatedAt ?? ""));
 }
 
 export async function syncLinearIssueForAgentSession(
