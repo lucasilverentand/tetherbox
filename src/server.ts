@@ -126,7 +126,7 @@ export function createRequestHandler(options: RequestHandlerOptions): (request: 
       const action = getAgentSessionAction(event);
       if (!action) {
         const reason = `Ignored unsupported Linear AgentSessionEvent action: ${event.action ?? "missing"}`;
-        await state.addEvent("warn", reason);
+        await state.addEvent("warn", reason, undefined, "linear");
         return Response.json({
           ok: true,
           accepted: false,
@@ -238,7 +238,7 @@ async function intakeLinearWebhook(options: LinearWebhookIntakeOptions): Promise
       await postRepoSelection(config, state, sessionId, config.repos, jobId);
       return;
     }
-    await state.addEvent("error", message, jobId);
+    await state.addEvent("error", message, jobId, "linear");
     await safeUpdateLinearAgentSession(config, state, sessionId, {
       plan: [
         { content: "Acknowledge Linear session", status: "completed" },
@@ -263,7 +263,12 @@ async function handleLinearStopSignal(options: {
   const { config, state, queue, sessionId } = options;
   const activeJob = state.getActiveJobForSession(sessionId);
   if (!activeJob) {
-    await state.addEvent("warn", `Stop signal received for Linear session ${sessionId}, but no active job was found`);
+    await state.addEvent(
+      "warn",
+      `Stop signal received for Linear session ${sessionId}, but no active job was found`,
+      undefined,
+      "linear",
+    );
     await safePostLinearActivity(config, state, sessionId, {
       type: "response",
       body: "No active local Codex job was running.",
@@ -412,7 +417,7 @@ async function maybeHandleApprovalReply(options: {
   const record = state.getJob(pending.jobId);
   if (!record) {
     state.resolveApproval(pending.id, "denied");
-    await state.addEvent("error", "Approval target job no longer exists", pending.jobId);
+    await state.addEvent("error", "Approval target job no longer exists", pending.jobId, "approval");
     return true;
   }
 
@@ -472,7 +477,7 @@ async function safeUpdateLinearAgentSession(
     await updateLinearAgentSession(config, sessionId, input, state);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to update Linear agent session";
-    await state.addEvent("warn", message, jobId);
+    await state.addEvent("warn", message, jobId, "linear");
   }
 }
 
@@ -487,6 +492,6 @@ async function safePostLinearActivity(
     await postLinearActivity(config, sessionId, content, state);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to post Linear activity";
-    await state.addEvent("warn", message, jobId);
+    await state.addEvent("warn", message, jobId, "linear");
   }
 }

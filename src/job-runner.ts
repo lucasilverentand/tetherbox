@@ -70,7 +70,7 @@ export async function runJob(
       startupTimeoutMs: config.codex.appServerStartupTimeoutMs,
       turnTimeoutMs: config.codex.turnTimeoutMs,
       onLifecycleEvent: (event) => {
-        void state.addEvent(event.level, event.message, job.id);
+        void state.addEvent(event.level, event.message, job.id, "codex");
       },
     });
   const stopOnCancel = () => client.stop();
@@ -228,7 +228,7 @@ async function runCodexTurn(
     sandbox: options.sandbox,
     onNotification: (notification) => {
       if (notification.method) {
-        void state.addEvent("info", `Codex: ${notification.method}`, job.id);
+        void state.addEvent("info", `Codex: ${notification.method}`, job.id, "codex");
       }
     },
   });
@@ -269,7 +269,7 @@ async function postActivity(
     await postLinearActivity(config, job.sessionId, content, state);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to post Linear activity";
-    await state.addEvent("warn", message, job.id);
+    await state.addEvent("warn", message, job.id, "linear");
   }
 }
 
@@ -283,6 +283,6 @@ async function updatePlan(
     await updateLinearAgentSession(config, job.sessionId, { plan }, state);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to update Linear agent session";
-    await state.addEvent("warn", message, job.id);
+    await state.addEvent("warn", message, job.id, "linear");
   }
 }

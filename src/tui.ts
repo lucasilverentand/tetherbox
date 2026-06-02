@@ -69,7 +69,7 @@ async function draw(options: TuiOptions): Promise<void> {
     process.stdout.write("-------------\n");
     for (const event of state.events.slice(0, 10)) {
       process.stdout.write(
-        `${formatDate(event.createdAt)} ${event.level.toUpperCase().padEnd(5)} ${truncate(event.message, 86)}\n`,
+        `${formatDate(event.createdAt)} ${event.level.toUpperCase().padEnd(5)} ${event.source.padEnd(10)} ${truncate(event.message, 75)}\n`,
       );
     }
   } catch (error) {

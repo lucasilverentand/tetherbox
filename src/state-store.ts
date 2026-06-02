@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import { Database } from "bun:sqlite";
+import { redact, redactValue } from "./redaction";
 import type { DaemonEvent, DaemonState, JobRecord, JobStatus, LinearIssueContext, RepoMapping, RoutedJob } from "./types";
 import type { WorktreeInfo } from "./worktree-manager";
 
@@ -31,6 +32,7 @@ interface JobRow {
 interface EventRow {
   id: string;
   job_id: string | null;
+  source: string;
   level: DaemonEvent["level"];
   message: string;
   created_at: string;
@@ -141,7 +143,7 @@ export class StateStore {
     const jobs = db
       .query("select * from jobs order by updated_at desc, created_at desc limit 200")
       .all()
-      .map((row) => jobFromRow(row as JobRow));
+      .map((row) => jobFromRow(row as JobRow, true));
     const events = db
       .query("select * from job_events order by created_at desc, id desc limit 500")
       .all()
@@ -259,7 +261,7 @@ export class StateStore {
         0,
         0,
       );
-      this.insertEvent("info", `Queued job for ${record.repo}`, record.id, now);
+      this.insertEvent("queue", "info", `Queued job for ${record.repo}`, record.id, now);
     })();
 
     return record;
@@ -315,7 +317,7 @@ export class StateStore {
        updated_at = ?
        where id = (select session_id from jobs where id = ?)`,
     ).run(status, status, now, id);
-    await this.addEvent(status === "failed" ? "error" : "info", lastMessage, id);
+    await this.addEvent(status === "failed" ? "error" : "info", lastMessage, id, "job");
   }
 
   async setJobWorktree(id: string, worktree: WorktreeInfo): Promise<void> {
@@ -329,7 +331,7 @@ export class StateStore {
       return;
     }
 
-    await this.addEvent("info", `Prepared worktree ${worktree.branchName}`, id);
+    await this.addEvent("info", `Prepared worktree ${worktree.branchName}`, id, "worktree");
   }
 
   getJob(id: string): JobRecord | undefined {
@@ -509,7 +511,7 @@ export class StateStore {
       .run(threadId, now, sessionId);
 
     if (result.changes > 0) {
-      await this.addEvent("info", `Linked Linear session to Codex thread ${threadId}`, jobId);
+      await this.addEvent("info", `Linked Linear session to Codex thread ${threadId}`, jobId, "codex");
     }
   }
 
@@ -614,8 +616,8 @@ export class StateStore {
       );
   }
 
-  async addEvent(level: DaemonEvent["level"], message: string, jobId?: string): Promise<void> {
-    this.insertEvent(level, message, jobId, new Date().toISOString());
+  async addEvent(level: DaemonEvent["level"], message: string, jobId?: string, source = "daemon"): Promise<void> {
+    this.insertEvent(source, level, message, jobId, new Date().toISOString());
   }
 
   private migrate(): void {
@@ -694,6 +696,7 @@ export class StateStore {
       create table if not exists job_events (
         id text primary key,
         job_id text references jobs(id) on delete cascade,
+        source text not null default 'daemon',
         level text not null,
         message text not null,
         created_at text not null
@@ -741,6 +744,7 @@ export class StateStore {
     `);
     this.addColumnIfMissing("jobs", "prompt", "text");
     this.addColumnIfMissing("approvals", "expires_at", "text");
+    this.addColumnIfMissing("job_events", "source", "text not null default 'daemon'");
   }
 
   private ensureStartedAt(): void {
@@ -761,10 +765,16 @@ export class StateStore {
     return row?.value ?? "";
   }
 
-  private insertEvent(level: DaemonEvent["level"], message: string, jobId: string | undefined, createdAt: string): void {
+  private insertEvent(
+    source: string,
+    level: DaemonEvent["level"],
+    message: string,
+    jobId: string | undefined,
+    createdAt: string,
+  ): void {
     this.requireDb()
-      .query("insert into job_events (id, job_id, level, message, created_at) values (?, ?, ?, ?, ?)")
-      .run(randomUUID(), jobId ?? null, level, message, createdAt);
+      .query("insert into job_events (id, job_id, source, level, message, created_at) values (?, ?, ?, ?, ?, ?)")
+      .run(randomUUID(), jobId ?? null, redact(source), level, redact(message), createdAt);
   }
 
   private requireDb(): Database {
@@ -799,8 +809,8 @@ export function createJobId(sessionId: string): string {
   return `${sessionId}-${randomUUID().slice(0, 8)}`;
 }
 
-function jobFromRow(row: JobRow): JobRecord {
-  return {
+function jobFromRow(row: JobRow, redactForOutput = false): JobRecord {
+  const record = {
     id: row.id,
     sessionId: row.session_id,
     status: row.status,
@@ -822,12 +832,14 @@ function jobFromRow(row: JobRow): JobRecord {
     retryCount: row.retry_count,
     failureReason: row.failure_reason ?? undefined,
   };
+  return redactForOutput ? redactValue(record) : record;
 }
 
 function eventFromRow(row: EventRow): DaemonEvent {
   return {
     id: row.id,
     jobId: row.job_id ?? undefined,
+    source: row.source,
     level: row.level,
     message: row.message,
     createdAt: row.created_at,

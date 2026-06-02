@@ -180,6 +180,7 @@ export interface DaemonState {
 export interface DaemonEvent {
   id: string;
   jobId?: string;
+  source: string;
   level: "info" | "warn" | "error";
   message: string;
   createdAt: string;
