@@ -128,17 +128,14 @@ describe("server webhook handling", () => {
       });
       const sessionUpdates = linearSessionUpdateInputs(fetchMock.calls, "sess_1");
       expect(sessionUpdates[0]).toMatchObject({
-        externalUrls: [{
-          label: "Tetherbox job",
-          url: expect.stringMatching(/^https:\/\/bridge\.example\/api\/status#sess_1-[a-f0-9]{8}$/),
-        }],
-      });
-      expect(sessionUpdates[1]).toMatchObject({
         addedExternalUrls: [{
           label: "Tetherbox job",
           url: expect.stringMatching(/^https:\/\/bridge\.example\/api\/status#sess_1-[a-f0-9]{8}$/),
         }],
       });
+      expect(sessionUpdates[0]).not.toHaveProperty("externalUrls");
+      expect(sessionUpdates[1]).not.toHaveProperty("externalUrls");
+      expect(sessionUpdates[1]).not.toHaveProperty("addedExternalUrls");
       const activities = linearActivityInputs(fetchMock.calls);
       expect(activities).toContainEqual(
         expect.objectContaining({
