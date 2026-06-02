@@ -92,6 +92,7 @@ describe("pull request automation", () => {
       "git",
       "git",
       "gh",
+      "gh",
     ]);
     const commit = runner.commands.find(
       (command) => command.kind === "run" && command.command === "git" && command.args.includes("commit"),
@@ -107,6 +108,39 @@ describe("pull request automation", () => {
         "Co-authored-by: Codex <codex@openai.com>",
       ]),
     });
+  });
+
+  test("updates an existing PR for the branch instead of creating a duplicate", async () => {
+    const runner = new FakeRunner([
+      { stdout: " M src/app.ts\n", stderr: "" },
+      { stdout: "", stderr: "" },
+      { stdout: "", stderr: "" },
+      { stdout: "", stderr: "" },
+      { stdout: "", stderr: "" },
+    ]);
+    runner.shellResults.push({ stdout: "tests passed\n", stderr: "" });
+    runner.existingPullRequest = {
+      url: "https://github.com/lucasilverentand/example/pull/42",
+      number: 42,
+    };
+
+    const result = await finalizeSuccessfulRun(config, job, worktree, runner);
+    const edit = runner.commands.find(
+      (command) => command.kind === "run" && command.command === "gh" && command.args[0] === "pr" && command.args[1] === "edit",
+    );
+    const create = runner.commands.find(
+      (command) => command.kind === "run" && command.command === "gh" && command.args[0] === "pr" && command.args[1] === "create",
+    );
+
+    expect(result).toMatchObject({
+      status: "updated",
+      url: "https://github.com/lucasilverentand/example/pull/42",
+      number: 42,
+    });
+    expect(edit).toMatchObject({
+      args: expect.arrayContaining(["pr", "edit", "42", "--repo", "lucasilverentand/example"]),
+    });
+    expect(create).toBeUndefined();
   });
 
   test("creates an unsigned co-authored commit when the configured signing key is missing", async () => {
@@ -245,12 +279,19 @@ class FakeRunner implements CommandRunner {
   failRun?: string;
   failSignedCommit = false;
   existingFiles = new Set<string>();
+  existingPullRequest?: { url?: string; number?: number };
   shellResults: CommandResult[] = [];
 
   constructor(private readonly results: CommandResult[]) {}
 
   async run(command: string, args: string[], cwd: string): Promise<CommandResult> {
     this.commands.push({ kind: "run", command, args, cwd });
+    if (command === "gh" && args[0] === "pr" && args[1] === "view") {
+      if (!this.existingPullRequest) {
+        throw new Error("no pull request found");
+      }
+      return { stdout: JSON.stringify(this.existingPullRequest), stderr: "" };
+    }
     if (this.failSignedCommit && command === "git" && args.includes("commit") && args.includes("-S")) {
       this.failSignedCommit = false;
       throw new Error("signing failed");
