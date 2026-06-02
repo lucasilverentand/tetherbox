@@ -48,10 +48,18 @@ export async function runJob(
   }
 
   if (job.policy.decision === "require_approval") {
-    state.createApproval(job.id, "Run local Codex");
+    const approvalTimeoutMs = config.queue?.approvalTimeoutMs;
+    const expiresAt =
+      approvalTimeoutMs && approvalTimeoutMs > 0 ? new Date(Date.now() + approvalTimeoutMs).toISOString() : undefined;
+    state.createApproval(job.id, "Run local Codex", expiresAt);
     await postActivity(config, state, job, {
       type: "elicitation",
-      body: "Approval required before running local Codex. Reply `approve` to continue or `deny` to cancel.",
+      body: [
+        "Approval required before running local Codex. Reply `approve` to continue or `deny` to cancel.",
+        expiresAt ? `This approval expires at ${expiresAt}.` : undefined,
+      ]
+        .filter(Boolean)
+        .join(" "),
     });
     return { status: "waiting_approval", message: "Approval required before running local Codex" };
   }

@@ -15,6 +15,7 @@ export interface BridgeConfig {
   queue?: {
     concurrency?: number;
     shutdownGraceMs?: number;
+    approvalTimeoutMs?: number;
   };
   linear: {
     webhookSecretEnv: string;
