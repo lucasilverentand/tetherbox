@@ -314,6 +314,75 @@ describe("Linear webhook handling", () => {
     expect(prompt).toContain("Earlier note");
     expect(prompt).toContain("Source: team / Open Source");
     expect(prompt).toContain("Please implement this issue");
+    expect(prompt).not.toContain("## Linear Workspace Context");
+  });
+
+  test("preserves structured Linear workspace context in Codex prompts", () => {
+    const event = parseLinearAgentEvent(
+      JSON.stringify({
+        agentSession: {
+          id: "sess_1",
+          promptContext: "Implement the customer-facing issue",
+          issue: {
+            identifier: "OSS-268",
+            title: "Preserve structured workspace context",
+            description: "Codex needs the surrounding Linear context.",
+            labels: ["Developer Tools"],
+            project: {
+              name: "Build Tetherbox",
+              url: "https://linear.app/seventwo/project/build-tetherbox",
+            },
+            initiative: {
+              name: "Local Linear coding agent",
+            },
+            cycle: {
+              name: "Cycle 44",
+            },
+            milestone: {
+              name: "M1",
+            },
+            parent: {
+              identifier: "OSS-220",
+              title: "Tetherbox M1",
+              url: "https://linear.app/seventwo/issue/OSS-220",
+            },
+            relatedIssues: [
+              {
+                identifier: "OSS-267",
+                title: "Attach inbox context",
+              },
+            ],
+            customerRequests: [
+              {
+                title: "Need local agent assignment",
+                url: "https://linear.app/seventwo/customer-request/cr-1",
+                customer: {
+                  name: "Seventwo",
+                },
+              },
+            ],
+            documents: [
+              {
+                title: "Agent rollout notes",
+                url: "https://linear.app/seventwo/document/agent-rollout",
+              },
+            ],
+          },
+        },
+      }),
+    );
+
+    const prompt = buildLinearJobPrompt(event);
+
+    expect(prompt).toContain("## Linear Workspace Context");
+    expect(prompt).toContain("Project: Build Tetherbox");
+    expect(prompt).toContain("Initiative: Local Linear coding agent");
+    expect(prompt).toContain("Cycle: Cycle 44");
+    expect(prompt).toContain("Milestone: M1");
+    expect(prompt).toContain("Parent issue: OSS-220: Tetherbox M1");
+    expect(prompt).toContain("Related issue: OSS-267: Attach inbox context");
+    expect(prompt).toContain("Customer request: customer Seventwo - Need local agent assignment");
+    expect(prompt).toContain("Document: Agent rollout notes");
   });
 
   test("keeps prompted follow-up text with issue context", () => {

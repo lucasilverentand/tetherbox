@@ -294,6 +294,7 @@ export function buildLinearJobPrompt(
     issue.teamKey ? `- Team: ${issue.teamKey}` : undefined,
     issue.labels.length ? `- Labels: ${issue.labels.join(", ")}` : undefined,
     issue.description ? ["", "### Description", issue.description].join("\n") : undefined,
+    formatWorkspaceContext(issue),
     comment?.body ? ["", "## Current Comment", formatComment(comment)].join("\n") : undefined,
     previousComments.length ? ["", "## Previous Comments", previousComments.map(formatComment).join("\n\n")].join("\n") : undefined,
     guidance.length ? ["", "## Linear Guidance", guidance.map(formatGuidance).join("\n\n")].join("\n") : undefined,
@@ -1012,6 +1013,62 @@ function definedString<K extends "body" | "action" | "parameter" | "result">(
   value: string | undefined,
 ): Pick<LinearAgentSessionActivity, K> | Record<string, never> {
   return value ? { [key]: value } as Pick<LinearAgentSessionActivity, K> : {};
+}
+
+function formatWorkspaceContext(issue: LinearIssueContext): string | undefined {
+  const lines = [
+    formatNamedContext("Project", issue.project),
+    formatNamedContext("Initiative", issue.initiative),
+    formatNamedContext("Cycle", issue.cycle),
+    formatNamedContext("Milestone", issue.milestone),
+    formatNamedContext("Parent issue", issue.parent),
+    ...formatNamedContextList("Related issue", issue.relatedIssues),
+    ...formatCustomerRequests(issue.customerRequests),
+    ...formatNamedContextList("Document", issue.documents),
+  ].filter(Boolean);
+
+  return lines.length ? ["", "## Linear Workspace Context", lines.join("\n")].join("\n") : undefined;
+}
+
+function formatNamedContext(
+  label: string,
+  item: LinearIssueContext["project"],
+): string | undefined {
+  if (!item) {
+    return undefined;
+  }
+
+  const key = item.identifier ?? item.key;
+  const name = item.name ?? item.title;
+  const display = [key, name].filter(Boolean).join(": ") || item.id;
+  if (!display) {
+    return undefined;
+  }
+
+  const suffix = [item.url, item.description].filter(Boolean).join(" - ");
+  return `- ${label}: ${suffix ? `${display} (${suffix})` : display}`;
+}
+
+function formatNamedContextList(
+  label: string,
+  items: LinearIssueContext["relatedIssues"],
+): string[] {
+  return (items ?? []).map((item) => formatNamedContext(label, item)).filter((line): line is string => Boolean(line));
+}
+
+function formatCustomerRequests(requests: LinearIssueContext["customerRequests"]): string[] {
+  return (requests ?? [])
+    .map((request) => {
+      const customer = formatNamedContext("Customer", request.customer)?.replace(/^- Customer: /, "");
+      const display = firstText(request.title, request.body, request.id);
+      if (!customer && !display) {
+        return undefined;
+      }
+
+      const parts = [customer ? `customer ${customer}` : undefined, display].filter(Boolean).join(" - ");
+      return `- Customer request: ${request.url ? `${parts} (${request.url})` : parts}`;
+    })
+    .filter((line): line is string => Boolean(line));
 }
 
 async function exchangeLinearOAuthToken(

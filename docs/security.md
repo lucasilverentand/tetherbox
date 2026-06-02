@@ -14,7 +14,7 @@ Trusted:
 
 Untrusted:
 
-- Linear issue text, comments, guidance, and prompt context.
+- Linear issue text, comments, guidance, prompt context, and structured workspace metadata such as projects, initiatives, customer requests, related issues, and linked documents.
 - Webhook requests without a valid Linear signature.
 - Any generated code or shell command suggested by model output.
 

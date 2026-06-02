@@ -73,6 +73,32 @@ export interface LinearIssueContext {
   labels: string[];
   priority?: number | { value?: number; name?: string };
   url?: string;
+  project?: LinearNamedContext;
+  initiative?: LinearNamedContext;
+  cycle?: LinearNamedContext;
+  milestone?: LinearNamedContext;
+  parent?: LinearNamedContext;
+  relatedIssues?: LinearNamedContext[];
+  customerRequests?: LinearCustomerRequestContext[];
+  documents?: LinearNamedContext[];
+}
+
+export interface LinearNamedContext {
+  id?: string;
+  key?: string;
+  identifier?: string;
+  name?: string;
+  title?: string;
+  description?: string;
+  url?: string;
+}
+
+export interface LinearCustomerRequestContext {
+  id?: string;
+  title?: string;
+  body?: string;
+  url?: string;
+  customer?: LinearNamedContext;
 }
 
 export interface LinearAgentSessionEvent {
