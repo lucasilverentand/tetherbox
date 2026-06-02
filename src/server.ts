@@ -649,9 +649,13 @@ function repoFromSelectionReply(
     if (byValue) {
       return byValue;
     }
+    const bySelectedText = repoFromSelectionText(config.repos, selected);
+    if (bySelectedText) {
+      return bySelectedText;
+    }
   }
 
-  return findExplicitRepo(config.repos, prompt);
+  return repoFromSelectionText(config.repos, prompt) ?? findExplicitRepo(config.repos, prompt);
 }
 
 function selectionValue(event: ReturnType<typeof parseLinearAgentEvent>): string | undefined {
@@ -668,6 +672,25 @@ function selectionValue(event: ReturnType<typeof parseLinearAgentEvent>): string
     }
   }
   return undefined;
+}
+
+function repoFromSelectionText(repos: RepoMapping[], text: string): RepoMapping | undefined {
+  const normalized = text.toLowerCase();
+  const fullNameMatches = repos.filter((repo) => normalized.includes(repo.github.toLowerCase()));
+  if (fullNameMatches.length === 1) {
+    return fullNameMatches[0];
+  }
+  if (fullNameMatches.length > 1) {
+    return undefined;
+  }
+
+  const repoNameMatches = repos.filter((repo) => textMentionsRepoName(normalized, repo.github.split("/").at(-1) ?? repo.github));
+  return repoNameMatches.length === 1 ? repoNameMatches[0] : undefined;
+}
+
+function textMentionsRepoName(normalizedText: string, repoName: string): boolean {
+  const normalizedRepo = repoName.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(^|[^a-z0-9._-])${normalizedRepo}([^a-z0-9._-]|$)`, "i").test(normalizedText);
 }
 
 async function maybeHandleApprovalReply(options: {
