@@ -36,7 +36,7 @@ Tetherbox uses these secrets:
 - Codex CLI auth stored by the Codex CLI.
 - GitHub CLI auth or SSH keys used by Git and `gh`.
 
-Store config files and SQLite state with permissions appropriate for the service user. The SQLite database can contain Linear tokens, issue metadata, prompts, job events, branch names, pull request URLs, and Codex thread IDs.
+Store config files and SQLite state with permissions appropriate for the service user. The SQLite database can contain Linear tokens, issue metadata, customer request and initiative context, prompts, job events, branch names, pull request URLs, and Codex thread IDs.
 
 Do not commit local config files with real secrets. Keep `examples/config.json` as shape-only documentation.
 

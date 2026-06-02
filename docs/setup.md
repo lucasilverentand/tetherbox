@@ -60,7 +60,7 @@ Use these settings:
 - Redirect URL: `${server.publicUrl}/oauth/linear/callback`
 - Webhook URL: `${server.publicUrl}/webhooks/linear`
 - Webhook categories: Agent session events, Inbox Notifications, Permission changes, OAuth app
-- OAuth scopes: `read`, `write`, `app:assignable`, `app:mentionable`
+- OAuth scopes: `read`, `write`, `app:assignable`, `app:mentionable`, `customer:read`, `initiative:read`
 
 Install the app actor by opening:
 
@@ -68,7 +68,7 @@ Install the app actor by opening:
 https://your-public-host.example.com/oauth/linear/start
 ```
 
-Tetherbox redirects to Linear with `actor=app`, validates callback state, exchanges the OAuth code, and stores the app actor token in SQLite.
+Tetherbox redirects to Linear with `actor=app`, validates callback state, exchanges the OAuth code, and stores the app actor token in SQLite. Customer and initiative scopes are read-only by default; add write-level customer or initiative scopes to `linear.oauthScopes` only if you intentionally extend Tetherbox to modify those records.
 That stored app user ID is also used to set the issue delegate when a session starts. If the delegated issue is still in backlog or another non-started state, Tetherbox moves it to the team's first started workflow state before queueing local Codex work. The local Codex prompt includes Linear issue text, comments, guidance, activity history, and structured workspace metadata such as projects, initiatives, customer requests, related issues, and linked documents when Linear includes those fields in the webhook payload.
 When API access is available, Tetherbox reads Agent Session activities and includes their frozen prompt/action/response history in the local Codex prompt so follow-up work is not dependent on editable comments alone.
 Follow-up prompts for the same Agent Session are serialized behind the active session job before they continue the shared Codex thread. Jobs for different Agent Sessions still use the configured queue concurrency.

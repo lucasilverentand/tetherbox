@@ -23,7 +23,7 @@
     "reviewStateName": "In Review",
     "oauthClientIdEnv": "LINEAR_CLIENT_ID",
     "oauthClientSecretEnv": "LINEAR_CLIENT_SECRET",
-    "oauthScopes": ["read", "write", "app:assignable", "app:mentionable"]
+    "oauthScopes": ["read", "write", "app:assignable", "app:mentionable", "customer:read", "initiative:read"]
   },
   "codex": {
     "bin": "codex",

@@ -95,7 +95,7 @@ export type LinearAgentSessionAction = "created" | "prompted";
 const LINEAR_GRAPHQL_URL = "https://api.linear.app/graphql";
 const LINEAR_AUTHORIZE_URL = "https://linear.app/oauth/authorize";
 const LINEAR_TOKEN_URL = "https://api.linear.app/oauth/token";
-const DEFAULT_OAUTH_SCOPES = ["read", "write", "app:assignable", "app:mentionable"];
+const DEFAULT_OAUTH_SCOPES = ["read", "write", "app:assignable", "app:mentionable", "customer:read", "initiative:read"];
 
 export interface LinearTokenStore {
   getLinearInstallation(workspaceId?: string): LinearInstallationRecord | undefined;
