@@ -135,7 +135,7 @@ export async function runJob(
       await state.addEvent("warn", warning, job.id, "git");
       await postActivity(config, state, job, { type: "thought", body: warning });
     }
-    if (pullRequest.status === "created") {
+    if (pullRequest.status === "created" || pullRequest.status === "updated") {
       state.savePullRequest({
         jobId: job.id,
         githubRepo: job.repo.github,
@@ -146,7 +146,7 @@ export async function runJob(
       });
       await postActivity(config, state, job, {
         type: "action",
-        action: "Created pull request",
+        action: pullRequest.status === "created" ? "Created pull request" : "Updated pull request",
         parameter: job.repo.github,
         result: pullRequest.url,
       });

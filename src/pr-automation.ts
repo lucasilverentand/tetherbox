@@ -5,11 +5,16 @@ import type { BridgeConfig, RoutedJob } from "./types";
 import type { WorktreeInfo } from "./worktree-manager";
 
 export interface PullRequestResult {
-  status: "no_changes" | "created";
+  status: "no_changes" | "created" | "updated";
   url?: string;
   number?: number;
   warnings?: string[];
   validation?: ValidationCommandResult[];
+}
+
+interface ExistingPullRequest {
+  url?: string;
+  number?: number;
 }
 
 export interface PullRequestCheckResult {
@@ -70,6 +75,32 @@ export async function finalizeSuccessfulRun(
   await runner.run("git", ["add", "--all"], worktree.path);
   await createCommit(config, job, worktree, runner, warnings);
   await runner.run("git", ["push", "-u", "origin", worktree.branchName], worktree.path);
+  const existing = await findExistingPullRequest(job.repo.github, worktree, runner);
+  if (existing) {
+    await runner.run(
+      "gh",
+      [
+        "pr",
+        "edit",
+        String(existing.number ?? existing.url ?? worktree.branchName),
+        "--repo",
+        job.repo.github,
+        "--title",
+        commitTitle(job),
+        "--body",
+        pullRequestBody(job, config),
+      ],
+      worktree.path,
+    );
+    return {
+      status: "updated",
+      url: existing.url,
+      number: existing.number,
+      warnings,
+      validation,
+    };
+  }
+
   const created = await runner.run(
     "gh",
     [
@@ -203,6 +234,24 @@ function commitArgs(job: RoutedJob, sign = false): string[] {
     "-m",
     "Co-authored-by: Codex <codex@openai.com>",
   ];
+}
+
+async function findExistingPullRequest(
+  repo: string,
+  worktree: WorktreeInfo,
+  runner: CommandRunner,
+): Promise<ExistingPullRequest | undefined> {
+  try {
+    const result = await runner.run(
+      "gh",
+      ["pr", "view", worktree.branchName, "--repo", repo, "--json", "url,number"],
+      worktree.path,
+    );
+    const parsed = JSON.parse(result.stdout) as ExistingPullRequest;
+    return parsed.url || parsed.number ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 async function runValidationCommands(
