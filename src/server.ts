@@ -166,17 +166,11 @@ export function createRequestHandler(options: RequestHandlerOptions): (request: 
         return Response.json({ error: timestampError.message, reason: timestampError.reason }, { status: 401 });
       }
       const deliveryId = linearWebhookDeliveryId(event, request.headers.get("Linear-Delivery"));
-      if (deliveryId && !state.claimWebhookDelivery(deliveryId)) {
-        await state.addEvent("info", `Ignored duplicate Linear webhook delivery ${deliveryId}`, undefined, "linear");
-        return Response.json({
-          ok: true,
-          accepted: false,
-          reason: "duplicate_webhook",
-          deliveryId,
-        });
-      }
       const managementWebhook = getLinearManagementWebhook(event);
       if (managementWebhook) {
+        if (deliveryId && !state.claimWebhookDelivery(deliveryId)) {
+          return duplicateLinearWebhookResponse(state, deliveryId);
+        }
         const canceledJobIds = await handleLinearManagementWebhook(state, queue, managementWebhook);
         return Response.json({
           ok: true,
@@ -189,6 +183,9 @@ export function createRequestHandler(options: RequestHandlerOptions): (request: 
 
       const inboxNotification = getLinearInboxNotificationWebhook(event);
       if (inboxNotification) {
+        if (deliveryId && !state.claimWebhookDelivery(deliveryId)) {
+          return duplicateLinearWebhookResponse(state, deliveryId);
+        }
         const canceledJobIds = await handleLinearInboxNotificationWebhook(state, queue, inboxNotification);
         return Response.json({
           ok: true,
@@ -201,8 +198,14 @@ export function createRequestHandler(options: RequestHandlerOptions): (request: 
 
       const action = getAgentSessionAction(event);
       if (!action) {
+        if (deliveryId && state.getProcessedWebhook(deliveryId)) {
+          return duplicateLinearWebhookResponse(state, deliveryId);
+        }
         const reason = `Ignored unsupported Linear AgentSessionEvent action: ${event.action ?? "missing"}`;
         await state.addEvent("warn", reason, undefined, "linear");
+        if (deliveryId) {
+          state.claimWebhookDelivery(deliveryId);
+        }
         return Response.json({
           ok: true,
           accepted: false,
@@ -211,14 +214,17 @@ export function createRequestHandler(options: RequestHandlerOptions): (request: 
         });
       }
       const sessionId = getSessionId(event);
+      if (deliveryId && state.getProcessedWebhook(deliveryId)) {
+        return duplicateLinearWebhookResponse(state, deliveryId);
+      }
       if (action === "prompted" && isStopSignal(event)) {
-        void handleLinearStopSignal({ config, state, queue, sessionId }).catch((error) => {
+        void handleLinearStopSignal({ config, state, queue, sessionId, deliveryId }).catch((error) => {
           console.error("Linear stop signal handling failed", error);
         });
         return Response.json({ ok: true, accepted: true, sessionId, stop: true });
       }
       const jobId = createJobId(sessionId);
-      void intakeLinearWebhook({ config, state, queue, event, sessionId, jobId }).catch((error) => {
+      void intakeLinearWebhook({ config, state, queue, event, sessionId, jobId, deliveryId }).catch((error) => {
         console.error("Linear webhook intake failed", error);
       });
       return Response.json({ ok: true, accepted: true, sessionId, jobId });
@@ -256,6 +262,16 @@ function linearWebhookTimestampError(
     };
   }
   return undefined;
+}
+
+async function duplicateLinearWebhookResponse(state: StateStore, deliveryId: string): Promise<Response> {
+  await state.addEvent("info", `Ignored duplicate Linear webhook delivery ${deliveryId}`, undefined, "linear");
+  return Response.json({
+    ok: true,
+    accepted: false,
+    reason: "duplicate_webhook",
+    deliveryId,
+  });
 }
 
 function linearWebhookDeliveryId(event: { webhookId?: unknown }, headerDeliveryId: string | null): string | undefined {
@@ -429,8 +445,8 @@ async function cancelActiveLinearJobs(
   return canceledJobIds;
 }
 
-function isOperatorRequest(config: BridgeConfig, request: Request, url: URL): boolean {
-  if (url.hostname === "127.0.0.1" || url.hostname === "localhost" || url.hostname === "::1") {
+function isOperatorRequest(config: BridgeConfig, request: Request, _url: URL): boolean {
+  if (isLoopbackHost(config.server.host)) {
     return true;
   }
 
@@ -443,6 +459,11 @@ function isOperatorRequest(config: BridgeConfig, request: Request, url: URL): bo
   const authorization = request.headers.get("Authorization");
   const headerToken = request.headers.get("X-Tetherbox-Operator-Token");
   return authorization === `Bearer ${expected}` || headerToken === expected;
+}
+
+function isLoopbackHost(host: string): boolean {
+  const normalized = host.toLowerCase();
+  return normalized === "127.0.0.1" || normalized === "localhost" || normalized === "::1";
 }
 
 async function retryJobFromApi(
@@ -539,10 +560,11 @@ interface LinearWebhookIntakeOptions {
   event: ReturnType<typeof parseLinearAgentEvent>;
   sessionId: string;
   jobId: string;
+  deliveryId?: string;
 }
 
 async function intakeLinearWebhook(options: LinearWebhookIntakeOptions): Promise<void> {
-  const { config, state, queue, event, sessionId, jobId } = options;
+  const { config, state, queue, event, sessionId, jobId, deliveryId } = options;
   const issue = getIssueContext(event);
   const replyPrompt = getPrompt(event);
   const externalUrl = statusExternalUrl(config, jobId);
@@ -593,7 +615,7 @@ async function intakeLinearWebhook(options: LinearWebhookIntakeOptions): Promise
     const repo = await routeRepoForSession(config, issue, prompt, sessionId, state);
     const policy = applyPolicy(config, issue, repo, { prompt });
     const job: RoutedJob = { id: jobId, sessionId, prompt, issue, repo, policy };
-    await state.createJob(job);
+    await state.createJob(job, deliveryId);
     await safeUpdateLinearAgentSession(config, state, sessionId, {
       ...(externalUrl ? { addedExternalUrls: [externalUrl] } : {}),
       plan: [
@@ -614,7 +636,7 @@ async function intakeLinearWebhook(options: LinearWebhookIntakeOptions): Promise
   } catch (error) {
     const message = error instanceof Error ? error.message : "Linear webhook intake failed";
     if (message === "Could not route Linear issue to a local repository") {
-      state.createRepoSelection({ id: jobId, sessionId, prompt, issue });
+      state.createRepoSelection({ id: jobId, sessionId, prompt, issue }, deliveryId);
       await safeUpdateLinearAgentSession(config, state, sessionId, {
         plan: [
           { content: "Acknowledge Linear session", status: "completed" },
@@ -647,8 +669,9 @@ async function handleLinearStopSignal(options: {
   state: StateStore;
   queue: Pick<JobQueue, "cancel">;
   sessionId: string;
+  deliveryId?: string;
 }): Promise<void> {
-  const { config, state, queue, sessionId } = options;
+  const { config, state, queue, sessionId, deliveryId } = options;
   const activeJob = state.getActiveJobForSession(sessionId);
   if (!activeJob) {
     await state.addEvent(
@@ -661,6 +684,9 @@ async function handleLinearStopSignal(options: {
       type: "response",
       body: "No active local Codex job was running.",
     });
+    if (deliveryId) {
+      state.claimWebhookDelivery(deliveryId);
+    }
     return;
   }
 
@@ -677,6 +703,9 @@ async function handleLinearStopSignal(options: {
     type: "response",
     body: "Stopped the local Codex run.",
   }, activeJob.id);
+  if (deliveryId) {
+    state.claimWebhookDelivery(deliveryId);
+  }
 }
 
 async function maybeHandleRepoSelectionReply(options: {
@@ -788,7 +817,7 @@ function selectionValue(event: ReturnType<typeof parseLinearAgentEvent>): string
 
 function repoFromSelectionText(repos: RepoMapping[], text: string): RepoMapping | undefined {
   const normalized = text.toLowerCase();
-  const fullNameMatches = repos.filter((repo) => normalized.includes(repo.github.toLowerCase()));
+  const fullNameMatches = repos.filter((repo) => textMentionsFullRepoName(normalized, repo.github));
   if (fullNameMatches.length === 1) {
     return fullNameMatches[0];
   }
@@ -798,6 +827,11 @@ function repoFromSelectionText(repos: RepoMapping[], text: string): RepoMapping 
 
   const repoNameMatches = repos.filter((repo) => textMentionsRepoName(normalized, repo.github.split("/").at(-1) ?? repo.github));
   return repoNameMatches.length === 1 ? repoNameMatches[0] : undefined;
+}
+
+function textMentionsFullRepoName(normalizedText: string, repoFullName: string): boolean {
+  const normalizedRepo = repoFullName.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(^|[^a-z0-9._-])${normalizedRepo}([^a-z0-9._-]|$)`, "i").test(normalizedText);
 }
 
 function textMentionsRepoName(normalizedText: string, repoName: string): boolean {
