@@ -1,0 +1,90 @@
+# Tetherbox Security
+
+Tetherbox is a local bridge between Linear Agent Sessions and Codex running on a developer-controlled host. Treat it as an automation service with access to local repositories, Codex auth, GitHub auth, and any files visible to the service user.
+
+## Trust Boundaries
+
+Trusted:
+
+- The local host and service user.
+- The configured repository checkouts.
+- The configured Tetherbox SQLite state path.
+- Codex CLI auth for the service user.
+- GitHub CLI auth for the service user.
+
+Untrusted:
+
+- Linear issue text, comments, guidance, and prompt context.
+- Webhook requests without a valid Linear signature.
+- Any generated code or shell command suggested by model output.
+
+Linear text is task input, not policy authority. Tetherbox adds that reminder to Codex prompts and evaluates local policy before starting Codex.
+
+## Why Codex App Server Stays Local
+
+`codex app-server` is a local stdio JSON-RPC process. Tetherbox starts it as a child process and talks to it over pipes.
+
+Do not expose Codex App Server on the public internet or behind a tunnel. It is not the public ingress point. The public ingress point is Tetherbox's HTTP server, which verifies Linear webhook signatures, applies routing and policy, persists state, and controls when Codex starts.
+
+## Secrets
+
+Tetherbox uses these secrets:
+
+- Linear webhook signing secret.
+- Linear OAuth client secret.
+- Linear app actor access and refresh tokens.
+- Codex CLI auth stored by the Codex CLI.
+- GitHub CLI auth or SSH keys used by Git and `gh`.
+
+Store config files and SQLite state with permissions appropriate for the service user. The SQLite database can contain Linear tokens, issue metadata, prompts, job events, branch names, pull request URLs, and Codex thread IDs.
+
+Do not commit local config files with real secrets. Keep `examples/config.json` as shape-only documentation.
+
+## Redaction Limits
+
+Tetherbox does not promise full secret redaction.
+
+It avoids exposing Codex App Server directly and verifies webhook signatures, but job prompts and events may contain user-provided text, file paths, command names, error messages, and Linear metadata. Treat `/api/status`, logs, and SQLite state as sensitive operational data.
+
+## Approval Boundaries
+
+Policy decisions define how much automation is allowed:
+
+- `allow_auto`: run Codex and continue to validation/PR automation.
+- `allow_plan_only`: run Codex in read-only mode and do not create a worktree, commit, push, or pull request.
+- `require_approval`: post a Linear approval prompt and wait.
+- `deny`: refuse the job before Codex starts.
+
+Approval-required jobs persist a pending approval in SQLite. Replies such as `approve` continue the job; `deny`, `cancel`, or a Linear stop signal cancel it. Pending approvals expire after `queue.approvalTimeoutMs`.
+
+Approving a job changes the local policy decision for that resumed job to an approved auto run. Use `require_approval` for work that can be allowed after explicit human confirmation, and `deny` for work that should never run through this daemon.
+
+## Webhook Handling
+
+Tetherbox verifies `Linear-Signature` before parsing webhook JSON. Malformed JSON and unsupported Agent Session actions are recorded as local audit events and do not enqueue work.
+
+The daemon returns a fast acknowledgement for valid webhooks, then processes the job asynchronously. This keeps Linear webhook delivery responsive while local Codex work runs separately.
+
+## Network Exposure
+
+Expose only the daemon HTTP routes needed by Linear:
+
+- `/webhooks/linear`
+- `/oauth/linear/start`
+- `/oauth/linear/callback`
+- `/healthz`
+- `/api/status`
+- `/api/jobs/:id/cancel`
+
+If `/api/status` is reachable outside your private network, assume job metadata is visible to anyone with access to that URL. Prefer a private tunnel or reverse proxy access controls for status and TUI use.
+
+## Operational Checks
+
+Before delegating real issues:
+
+1. Confirm `server.publicUrl` points at the Tetherbox daemon, not Codex App Server.
+2. Confirm Linear webhook signature verification is enabled with the expected secret.
+3. Confirm `codex.minSupportedVersion` is set or generated protocol metadata is current.
+4. Confirm each repo mapping points at the intended local checkout.
+5. Confirm policies default to approval or deny for sensitive work.
+6. Run `bun run check`.

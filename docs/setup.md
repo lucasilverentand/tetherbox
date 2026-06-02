@@ -1,0 +1,160 @@
+# Tetherbox Setup
+
+This guide covers a single Tetherbox daemon running on one macOS or Linux host with local repository checkouts, Codex auth, GitHub auth, and a public HTTPS tunnel for Linear webhooks.
+
+## Prerequisites
+
+- Bun 1.3 or newer.
+- Codex CLI installed and authenticated for the same user that runs Tetherbox.
+- Git installed.
+- GitHub CLI installed and authenticated if Tetherbox should create pull requests.
+- Local checkouts for every repository listed in `repos`.
+- A public HTTPS URL that forwards to the daemon.
+
+## Single-Host Quickstart
+
+Copy the example config:
+
+```bash
+cp examples/config.json config.local.json
+```
+
+Edit `config.local.json`:
+
+- Set `server.publicUrl` to the public tunnel URL.
+- Set `state.path` to a durable local path.
+- Set `linear.webhookSecretEnv`, `linear.apiKeyEnv`, `linear.oauthClientIdEnv`, and `linear.oauthClientSecretEnv`.
+- Add one `repos` entry for each local checkout.
+- Add policy rules under `policies`.
+
+Export the configured secrets:
+
+```bash
+export LINEAR_WEBHOOK_SECRET=...
+export LINEAR_API_KEY=...
+export LINEAR_CLIENT_ID=...
+export LINEAR_CLIENT_SECRET=...
+```
+
+Start the daemon:
+
+```bash
+bun run src/index.ts daemon --config config.local.json
+```
+
+Open the TUI from another shell:
+
+```bash
+bun run src/index.ts tui --url http://127.0.0.1:8787
+```
+
+## Linear App Setup
+
+Create a Linear OAuth application for Tetherbox.
+
+Use these settings:
+
+- Redirect URL: `${server.publicUrl}/oauth/linear/callback`
+- Webhook URL: `${server.publicUrl}/webhooks/linear`
+- Webhook category: Agent session events
+- OAuth scopes: `read`, `write`, `app:assignable`, `app:mentionable`
+
+Install the app actor by opening:
+
+```text
+https://your-public-host.example.com/oauth/linear/start
+```
+
+Tetherbox redirects to Linear with `actor=app`, validates callback state, exchanges the OAuth code, and stores the app actor token in SQLite.
+
+## Webhook Configuration
+
+Set Linear's webhook signing secret in the env var named by `linear.webhookSecretEnv`.
+
+Tetherbox verifies `Linear-Signature` with HMAC-SHA256 over the raw request body. Invalid signatures are rejected before parsing JSON.
+
+## Tunnel Options
+
+Linear must reach `/webhooks/linear` over HTTPS. Common options are:
+
+- Cloudflare Tunnel.
+- Tailscale Funnel.
+- ngrok.
+- A reverse proxy on a public host that forwards only the Tetherbox HTTP routes.
+
+Only expose the Tetherbox daemon HTTP server. Do not expose `codex app-server`.
+
+## Codex And GitHub Auth
+
+Run Tetherbox as the same user that owns:
+
+- Codex CLI auth.
+- Git remotes and SSH keys.
+- GitHub CLI auth.
+- Local repository checkouts.
+
+Check Codex before enabling webhooks:
+
+```bash
+codex --version
+codex app-server generate-json-schema --help
+```
+
+Check GitHub CLI auth before enabling PR creation:
+
+```bash
+gh auth status
+```
+
+## Repository Mappings
+
+Each `repos` entry maps Linear work to a local checkout:
+
+```json
+{
+  "linearTeams": ["ENG"],
+  "github": "lucasilverentand/example",
+  "localPath": "/Users/luca/Developer/example",
+  "defaultBase": "main",
+  "testCommands": ["bun test"]
+}
+```
+
+Routing order:
+
+1. Explicit GitHub repo mentions in the Linear prompt.
+2. Linear repository suggestions when `linear.apiKeyEnv` is configured.
+3. Static `linearTeams` mapping.
+4. The only configured repo, when there is exactly one.
+
+If routing is ambiguous, Tetherbox asks Linear for a repository selection instead of guessing.
+
+## Policy Config
+
+Policies live under `policies` in config order. The first matching rule wins. Every matcher present on a rule must match.
+
+Supported matchers:
+
+- `labels`
+- `paths`
+- `repos`
+- `teams`
+- `priorities`
+
+Supported decisions:
+
+- `allow_auto`
+- `allow_plan_only`
+- `require_approval`
+- `deny`
+
+`allow_plan_only` runs Codex in read-only mode and does not open a pull request. `require_approval` creates a pending approval and waits for a Linear reply. Pending approvals expire after `queue.approvalTimeoutMs`.
+
+## Service Install
+
+Example service definitions live in `examples/`:
+
+- `dev.tetherbox.plist` for macOS `launchd`.
+- `tetherbox.service` for Linux `systemd --user`.
+
+Run the service as the same user that has Codex, GitHub, Git, and local repo access. Keep secrets in the service manager's environment mechanism or in a local env file with restrictive file permissions.
