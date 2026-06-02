@@ -326,6 +326,31 @@ describe("runJob", () => {
           }),
         }),
       );
+      const activities = linearActivityInputs(calls);
+      expect(activities).toContainEqual(
+        expect.objectContaining({
+          ephemeral: true,
+          content: {
+            type: "action",
+            action: "Started Codex",
+            parameter: "lucasilverentand/example",
+          },
+        }),
+      );
+      const pullRequestActivity = activities.find((activity) => (
+        isActivityInput(activity)
+        && activity.content.type === "action"
+        && activity.content.action === "Created pull request"
+      ));
+      expect(pullRequestActivity).toEqual(
+        expect.objectContaining({
+          content: expect.objectContaining({
+            type: "action",
+            action: "Created pull request",
+          }),
+        }),
+      );
+      expect(isActivityInput(pullRequestActivity) ? pullRequestActivity.ephemeral : undefined).toBeUndefined();
     } finally {
       restore();
       state.close();
@@ -546,6 +571,45 @@ function mockFetch(calls: unknown[]): () => void {
   return () => {
     globalThis.fetch = original;
   };
+}
+
+function linearActivityInputs(calls: unknown[]): unknown[] {
+  return calls
+    .map((call) => {
+      if (
+        typeof call === "object"
+        && call !== null
+        && "body" in call
+        && typeof call.body === "object"
+        && call.body !== null
+        && "query" in call.body
+        && typeof call.body.query === "string"
+        && call.body.query.includes("agentActivityCreate")
+        && "variables" in call.body
+        && typeof call.body.variables === "object"
+        && call.body.variables !== null
+        && "input" in call.body.variables
+      ) {
+        return call.body.variables.input;
+      }
+      return undefined;
+    })
+    .filter((input) => input !== undefined);
+}
+
+function isActivityInput(value: unknown): value is {
+  content: { type: string; action?: string; body?: string; parameter?: string; result?: string };
+  ephemeral?: boolean;
+} {
+  return (
+    typeof value === "object"
+    && value !== null
+    && "content" in value
+    && typeof value.content === "object"
+    && value.content !== null
+    && "type" in value.content
+    && typeof value.content.type === "string"
+  );
 }
 
 function mockFetchForReviewTransition(calls: unknown[]): () => void {
