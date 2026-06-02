@@ -38,9 +38,10 @@ async function main(): Promise<void> {
 
   if (command === "gc-worktrees") {
     const config = await loadConfig(configPath);
-    const state = new StateStore(config.state?.path ?? "state/daemon.json");
+    const state = new StateStore(config.state?.path ?? "state/daemon.sqlite");
     await state.load();
     const result = await garbageCollectWorktrees(config, state.snapshot());
+    state.close();
     console.log(`Removed ${result.removed.length} worktree(s), skipped ${result.skipped.length}.`);
     return;
   }

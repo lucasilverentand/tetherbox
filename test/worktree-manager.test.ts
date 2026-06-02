@@ -5,7 +5,7 @@ import type { BridgeConfig, RoutedJob } from "../src/types";
 
 const config: BridgeConfig = {
   server: { host: "127.0.0.1", port: 8787 },
-  state: { path: "state/daemon.json" },
+  state: { path: "state/daemon.sqlite" },
   linear: { webhookSecretEnv: "LINEAR_WEBHOOK_SECRET" },
   codex: { bin: "codex", sandbox: "workspace-write" },
   repos: [

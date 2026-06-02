@@ -4,7 +4,7 @@
     "port": 8787
   },
   "state": {
-    "path": "state/daemon.json",
+    "path": "state/daemon.sqlite",
     "worktreeRetentionDays": 7
   },
   "linear": {

@@ -36,7 +36,7 @@ export function worktreeRoot(config: BridgeConfig): string {
 }
 
 export function daemonStateDirectory(config: BridgeConfig): string {
-  return resolve(dirname(config.state?.path ?? "state/daemon.json"));
+  return resolve(dirname(config.state?.path ?? "state/daemon.sqlite"));
 }
 
 export async function prepareWorktree(config: BridgeConfig, job: RoutedJob): Promise<WorktreeInfo> {
