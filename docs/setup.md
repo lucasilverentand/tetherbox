@@ -150,6 +150,18 @@ Supported decisions:
 
 `allow_plan_only` runs Codex in read-only mode and does not open a pull request. `require_approval` creates a pending approval and waits for a Linear reply. Pending approvals expire after `queue.approvalTimeoutMs`.
 
+## Validation Commands
+
+Each repo mapping can define `testCommands`. Tetherbox runs those commands in the isolated job worktree after Codex returns and before committing:
+
+```json
+{
+  "testCommands": ["bun test", "bun run lint"]
+}
+```
+
+Passing and failing command summaries are stored as `validation` job events. A failed validation command fails the job and posts a Linear error activity with the failed command and summarized output.
+
 ## Git Commit Signing
 
 Tetherbox creates commits from the isolated job worktree after configured validation commands pass. Set `git.signingKeyPath` to an SSH signing key if the daemon should force a specific key:

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   finalizeSuccessfulRun,
   parsePullRequestCheckOutput,
+  ValidationFailedError,
   watchPullRequestChecks,
   type CommandResult,
   type CommandRunner,
@@ -11,10 +12,20 @@ import type { BridgeConfig, RoutedJob } from "../src/types";
 describe("pull request automation", () => {
   test("runs validation and skips PR creation when there are no changes", async () => {
     const runner = new FakeRunner([{ stdout: "", stderr: "" }]);
+    runner.shellResults.push({ stdout: "ok\n", stderr: "" });
 
     const result = await finalizeSuccessfulRun(config, job, worktree, runner);
 
     expect(result.status).toBe("no_changes");
+    expect(result.validation).toEqual([
+      {
+        command: "bun test",
+        status: "passed",
+        stdout: "ok\n",
+        stderr: "",
+        summary: "ok",
+      },
+    ]);
     expect(runner.commands).toEqual([
       { kind: "shell", command: "bun test", cwd: "/tmp/worktree" },
       { kind: "run", command: "git", args: ["status", "--porcelain"], cwd: "/tmp/worktree" },
@@ -25,7 +36,24 @@ describe("pull request automation", () => {
     const runner = new FakeRunner([]);
     runner.failShell = true;
 
-    await expect(finalizeSuccessfulRun(config, job, worktree, runner)).rejects.toThrow("validation failed");
+    try {
+      await finalizeSuccessfulRun(config, job, worktree, runner);
+      throw new Error("Expected validation failure");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ValidationFailedError);
+      if (!(error instanceof ValidationFailedError)) {
+        throw error;
+      }
+      expect(error.results).toEqual([
+        {
+          command: "bun test",
+          status: "failed",
+          stdout: "",
+          stderr: "validation failed",
+          summary: "validation failed",
+        },
+      ]);
+    }
     expect(runner.commands).toEqual([{ kind: "shell", command: "bun test", cwd: "/tmp/worktree" }]);
   });
 
@@ -37,6 +65,7 @@ describe("pull request automation", () => {
       { stdout: "", stderr: "" },
       { stdout: "https://github.com/lucasilverentand/example/pull/42\n", stderr: "" },
     ]);
+    runner.shellResults.push({ stdout: "tests passed\n", stderr: "" });
     runner.existingFiles.add("/tmp/codex_signing_key");
 
     const result = await finalizeSuccessfulRun(signedConfig, job, worktree, runner);
@@ -46,6 +75,15 @@ describe("pull request automation", () => {
       url: "https://github.com/lucasilverentand/example/pull/42",
       number: 42,
       warnings: [],
+      validation: [
+        {
+          command: "bun test",
+          status: "passed",
+          stdout: "tests passed\n",
+          stderr: "",
+          summary: "tests passed",
+        },
+      ],
     });
     expect(runner.commands.map((command) => command.command)).toEqual([
       "bun test",
@@ -79,6 +117,7 @@ describe("pull request automation", () => {
       { stdout: "", stderr: "" },
       { stdout: "https://github.com/lucasilverentand/example/pull/42\n", stderr: "" },
     ]);
+    runner.shellResults.push({ stdout: "", stderr: "" });
 
     const result = await finalizeSuccessfulRun(signedConfig, job, worktree, runner);
     const commit = runner.commands.find(
@@ -105,6 +144,7 @@ describe("pull request automation", () => {
       { stdout: "", stderr: "" },
       { stdout: "https://github.com/lucasilverentand/example/pull/42\n", stderr: "" },
     ]);
+    runner.shellResults.push({ stdout: "", stderr: "" });
     runner.existingFiles.add("/tmp/codex_signing_key");
     runner.failSignedCommit = true;
 
@@ -205,6 +245,7 @@ class FakeRunner implements CommandRunner {
   failRun?: string;
   failSignedCommit = false;
   existingFiles = new Set<string>();
+  shellResults: CommandResult[] = [];
 
   constructor(private readonly results: CommandResult[]) {}
 
@@ -225,7 +266,7 @@ class FakeRunner implements CommandRunner {
     if (this.failShell) {
       throw new Error("validation failed");
     }
-    return { stdout: "", stderr: "" };
+    return this.shellResults.shift() ?? { stdout: "", stderr: "" };
   }
 
   async fileExists(path: string): Promise<boolean> {

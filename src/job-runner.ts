@@ -3,9 +3,11 @@ import { JobCanceledError, type JobQueueResult } from "./job-queue";
 import { postLinearActivity, updateLinearAgentSession, type LinearActivityContent, type LinearPlanStep } from "./linear";
 import {
   finalizeSuccessfulRun,
+  ValidationFailedError,
   watchPullRequestChecks,
   type PullRequestCheckResult,
   type PullRequestResult,
+  type ValidationCommandResult,
 } from "./pr-automation";
 import type { StateStore } from "./state-store";
 import type { BridgeConfig, CodexNotification, RoutedJob, SandboxMode } from "./types";
@@ -128,6 +130,7 @@ export async function runJob(
       actionParameter: job.repo.github,
     });
     const pullRequest = await (options.finalizeRun ?? finalizeSuccessfulRun)(config, job, worktree);
+    await recordValidationResults(state, job, pullRequest.validation ?? []);
     for (const warning of pullRequest.warnings ?? []) {
       await state.addEvent("warn", warning, job.id, "git");
       await postActivity(config, state, job, { type: "thought", body: warning });
@@ -192,6 +195,15 @@ export async function runJob(
       throw new JobCanceledError();
     }
 
+    if (error instanceof ValidationFailedError) {
+      await recordValidationResults(state, job, error.results);
+      const failed = error.results.find((result) => result.status === "failed");
+      await postActivity(config, state, job, {
+        type: "error",
+        body: `Validation failed: ${failed?.command ?? "unknown"}${failed?.summary ? `\n${failed.summary}` : ""}`,
+      });
+    }
+
     const message = error instanceof Error ? error.message : "Codex job failed";
     await updatePlan(config, state, job, [
       { content: "Route Linear context to a local repository", status: "completed" },
@@ -203,6 +215,21 @@ export async function runJob(
   } finally {
     options.signal?.removeEventListener("abort", stopOnCancel);
     client.stop();
+  }
+}
+
+async function recordValidationResults(
+  state: StateStore,
+  job: RoutedJob,
+  results: ValidationCommandResult[],
+): Promise<void> {
+  for (const result of results) {
+    await state.addEvent(
+      result.status === "failed" ? "error" : "info",
+      `Validation ${result.status}: ${result.command}\n${result.summary}`,
+      job.id,
+      "validation",
+    );
   }
 }
 

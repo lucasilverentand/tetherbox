@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 import { runJob } from "../src/job-runner";
+import { ValidationFailedError } from "../src/pr-automation";
 import { StateStore } from "../src/state-store";
 import type { BridgeConfig, CodexNotification, RoutedJob, SandboxMode } from "../src/types";
 
@@ -69,6 +70,39 @@ describe("runJob", () => {
     expect(event).toMatchObject({
       level: "warn",
       message: "Git signing key not found at /tmp/key; created an unsigned commit.",
+      jobId: "job-2",
+    });
+  });
+
+  test("records validation failures before failing jobs", async () => {
+    const state = new StateStore(await statePath());
+    await state.load();
+    await state.createJob(autoJob);
+    const client = new FakeCodexClient();
+
+    await expect(
+      runJob(config, autoJob, state, {
+        createClient: () => client,
+        prepareWorktree: async () => worktree,
+        finalizeRun: async () => {
+          throw new ValidationFailedError([
+            {
+              command: "bun test",
+              status: "failed",
+              stdout: "",
+              stderr: "expected true to be false",
+              summary: "expected true to be false",
+            },
+          ]);
+        },
+      }),
+    ).rejects.toThrow("Validation command failed: bun test");
+    const event = state.snapshot().events.find((candidate) => candidate.source === "validation");
+    state.close();
+
+    expect(event).toMatchObject({
+      level: "error",
+      message: "Validation failed: bun test\nexpected true to be false",
       jobId: "job-2",
     });
   });
