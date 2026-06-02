@@ -138,6 +138,7 @@ export interface JobRecord {
   sessionId: string;
   status: JobStatus;
   repo: string;
+  prompt?: string;
   branchName?: string;
   worktreePath?: string;
   issueIdentifier?: string;

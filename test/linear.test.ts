@@ -11,6 +11,7 @@ import {
   getSessionId,
   parseLinearAgentEvent,
   postLinearActivity,
+  parseApprovalDecision,
   statusExternalUrl,
   updateLinearAgentSession,
   verifyLinearSignature,
@@ -68,6 +69,14 @@ describe("Linear webhook handling", () => {
 
     expect(getPrompt(created)).toContain("<issue>");
     expect(getPrompt(prompted)).toBe("Please also add tests");
+  });
+
+  test("parses approval reply prompts", () => {
+    expect(parseApprovalDecision("approve, please continue")).toBe("approve");
+    expect(parseApprovalDecision("yes")).toBe("approve");
+    expect(parseApprovalDecision("deny this")).toBe("deny");
+    expect(parseApprovalDecision("cancel")).toBe("deny");
+    expect(parseApprovalDecision("what would you do?")).toBeUndefined();
   });
 
   test("posts agent activities through Linear GraphQL", async () => {

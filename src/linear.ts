@@ -25,6 +25,8 @@ export interface LinearRepositorySuggestion {
   confidence: number;
 }
 
+export type LinearApprovalDecision = "approve" | "deny";
+
 const LINEAR_GRAPHQL_URL = "https://api.linear.app/graphql";
 const LINEAR_AUTHORIZE_URL = "https://linear.app/oauth/authorize";
 const LINEAR_TOKEN_URL = "https://api.linear.app/oauth/token";
@@ -95,6 +97,17 @@ export function getPrompt(event: LinearAgentSessionEvent): string {
     event.agentSession?.prompt,
     event.prompt,
   );
+}
+
+export function parseApprovalDecision(value: string): LinearApprovalDecision | undefined {
+  const normalized = value.trim().toLowerCase();
+  if (/^(approve|approved|yes|y|run|continue|go ahead)\b/.test(normalized)) {
+    return "approve";
+  }
+  if (/^(deny|denied|no|n|cancel|stop|reject)\b/.test(normalized)) {
+    return "deny";
+  }
+  return undefined;
 }
 
 export async function postLinearActivity(
