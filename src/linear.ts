@@ -9,6 +9,13 @@ export type LinearActivityContent =
   | { type: "response"; body: string }
   | { type: "error"; body: string };
 
+export interface LinearActivityInput {
+  content: LinearActivityContent;
+  signal?: "auth" | "select" | string;
+  signalMetadata?: unknown;
+  ephemeral?: boolean;
+}
+
 export interface LinearPlanStep {
   content: string;
   status: "pending" | "inProgress" | "completed" | "canceled";
@@ -113,6 +120,17 @@ export function isStopSignal(event: LinearAgentSessionEvent): boolean {
 }
 
 export function getPrompt(event: LinearAgentSessionEvent): string {
+  if (event.action === "prompted") {
+    return firstText(
+      event.agentActivity?.body,
+      event.agentActivity?.content?.body,
+      event.agentSession?.promptContext,
+      event.promptContext,
+      event.agentSession?.prompt,
+      event.prompt,
+    );
+  }
+
   return firstText(
     event.agentSession?.promptContext,
     event.promptContext,
@@ -165,12 +183,13 @@ export function parseApprovalDecision(value: string): LinearApprovalDecision | u
 export async function postLinearActivity(
   config: BridgeConfig,
   agentSessionId: string,
-  content: LinearActivityContent,
+  activity: LinearActivityContent | LinearActivityInput,
   tokenStore?: LinearTokenStore,
 ): Promise<void> {
   const token = await getLinearAccessToken(config, tokenStore);
+  const input = linearActivityInput(agentSessionId, activity);
   if (!token) {
-    logLinearFallback("agentActivityCreate", { agentSessionId, content });
+    logLinearFallback("agentActivityCreate", input);
     return;
   }
 
@@ -184,10 +203,7 @@ export async function postLinearActivity(
       }
     }`,
     variables: {
-      input: {
-        agentSessionId,
-        content,
-      },
+      input,
     },
   });
 }
@@ -402,6 +418,15 @@ async function linearGraphql<T>(
 
 function logLinearFallback(operation: string, payload: unknown): void {
   console.log(JSON.stringify({ source: "linear.graphql.fallback", operation, payload }));
+}
+
+function linearActivityInput(agentSessionId: string, activity: LinearActivityContent | LinearActivityInput): LinearActivityInput & {
+  agentSessionId: string;
+} {
+  if ("content" in activity) {
+    return { agentSessionId, ...activity };
+  }
+  return { agentSessionId, content: activity };
 }
 
 function firstText(...values: Array<string | undefined>): string {
