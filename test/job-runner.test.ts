@@ -75,36 +75,130 @@ describe("runJob", () => {
   });
 
   test("records validation failures before failing jobs", async () => {
+    process.env.LINEAR_API_KEY = "lin_test";
+    const calls: unknown[] = [];
+    const restore = mockFetch(calls);
     const state = new StateStore(await statePath());
     await state.load();
     await state.createJob(autoJob);
     const client = new FakeCodexClient();
 
-    await expect(
-      runJob(config, autoJob, state, {
-        createClient: () => client,
-        prepareWorktree: async () => worktree,
-        finalizeRun: async () => {
-          throw new ValidationFailedError([
-            {
-              command: "bun test",
-              status: "failed",
-              stdout: "",
-              stderr: "expected true to be false",
-              summary: "expected true to be false",
+    try {
+      await expect(
+        runJob(
+          { ...config, linear: { ...config.linear, apiKeyEnv: "LINEAR_API_KEY" } },
+          autoJob,
+          state,
+          {
+            createClient: () => client,
+            prepareWorktree: async () => worktree,
+            finalizeRun: async () => {
+              throw new ValidationFailedError([
+                {
+                  command: "bun test",
+                  status: "failed",
+                  stdout: "",
+                  stderr: "expected true to be false",
+                  summary: "expected true to be false",
+                },
+              ]);
             },
-          ]);
-        },
-      }),
-    ).rejects.toThrow("Validation command failed: bun test");
-    const event = state.snapshot().events.find((candidate) => candidate.source === "validation");
-    state.close();
+          },
+        ),
+      ).rejects.toThrow("Validation command failed: bun test");
+      const event = state.snapshot().events.find((candidate) => candidate.source === "validation");
 
-    expect(event).toMatchObject({
-      level: "error",
-      message: "Validation failed: bun test\nexpected true to be false",
-      jobId: "job-2",
-    });
+      expect(event).toMatchObject({
+        level: "error",
+        message: "Validation failed: bun test\nexpected true to be false",
+        jobId: "job-2",
+      });
+      expect(calls).toContainEqual(
+        expect.objectContaining({
+          body: expect.objectContaining({
+            variables: expect.objectContaining({
+              input: expect.objectContaining({
+                content: {
+                  type: "action",
+                  action: "Validation failed",
+                  parameter: "bun test",
+                  result: "expected true to be false",
+                },
+              }),
+            }),
+          }),
+        }),
+      );
+    } finally {
+      restore();
+      state.close();
+      delete process.env.LINEAR_API_KEY;
+    }
+  });
+
+  test("posts passing validation results to Linear activities", async () => {
+    process.env.LINEAR_API_KEY = "lin_test";
+    const calls: unknown[] = [];
+    const restore = mockFetch(calls);
+    const state = new StateStore(await statePath());
+    await state.load();
+    await state.createJob(autoJob);
+    const client = new FakeCodexClient();
+
+    try {
+      const result = await runJob(
+        { ...config, linear: { ...config.linear, apiKeyEnv: "LINEAR_API_KEY" } },
+        autoJob,
+        state,
+        {
+          createClient: () => client,
+          prepareWorktree: async () => worktree,
+          finalizeRun: async () => ({
+            status: "no_changes",
+            validation: [
+              {
+                command: "bun test",
+                status: "passed",
+                stdout: "2 pass",
+                stderr: "",
+                summary: "2 pass",
+              },
+            ],
+          }),
+        },
+      );
+      const event = state.snapshot().events.find((candidate) => candidate.source === "validation");
+
+      expect(result).toEqual({
+        status: "completed",
+        message: "Codex turn completed",
+      });
+      expect(event).toMatchObject({
+        level: "info",
+        message: "Validation passed: bun test\n2 pass",
+        jobId: "job-2",
+      });
+      expect(calls).toContainEqual(
+        expect.objectContaining({
+          body: expect.objectContaining({
+            variables: expect.objectContaining({
+              input: expect.objectContaining({
+                content: {
+                  type: "action",
+                  action: "Validation passed",
+                  parameter: "bun test",
+                  result: "2 pass",
+                },
+              }),
+            }),
+          }),
+        }),
+      );
+    } finally {
+      restore();
+      state.close();
+      delete process.env.LINEAR_API_KEY;
+    }
   });
 
   test("pauses with a Linear auth signal when GitHub authentication is required", async () => {

@@ -168,7 +168,7 @@ Each repo mapping can define `testCommands`. Tetherbox runs those commands in th
 }
 ```
 
-Passing and failing command summaries are stored as `validation` job events. A failed validation command fails the job and posts a Linear error activity with the failed command and summarized output.
+Passing and failing command summaries are stored as `validation` job events and posted to Linear as action activities when Linear API access is configured. A failed validation command fails the job, posts the failed command result, and then posts a Linear error activity with the failed command and summarized output.
 
 ## Git Commit Signing
 
