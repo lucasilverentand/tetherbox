@@ -675,6 +675,13 @@ async function handleLinearStopSignal(options: {
   if (!canceledByQueue || activeJob.status === "waiting_approval") {
     await state.updateJob(activeJob.id, "canceled", "Canceled by Linear stop signal");
   }
+  await safeUpdateLinearAgentSession(config, state, sessionId, {
+    plan: [
+      { content: "Route Linear context to a local repository", status: "completed" },
+      { content: "Run Codex locally", status: "canceled" },
+      { content: "Report the result back to Linear", status: "completed" },
+    ],
+  }, activeJob.id);
   await safePostLinearActivity(config, state, sessionId, {
     type: "error",
     body: "Stopped the local Codex run.",
