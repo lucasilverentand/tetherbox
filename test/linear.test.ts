@@ -540,6 +540,10 @@ describe("Linear webhook handling", () => {
                     },
                   },
                 ],
+                pageInfo: {
+                  hasNextPage: false,
+                  endCursor: null,
+                },
               },
             },
           },
@@ -577,12 +581,302 @@ describe("Linear webhook handling", () => {
           variables: {
             id: "sess_1",
             first: 25,
+            after: null,
           },
         },
       });
     } finally {
       restore();
       delete process.env.LINEAR_API_KEY;
+    }
+  });
+
+  test("pages Linear Agent Session activities up to the configured limit", async () => {
+    const calls: unknown[] = [];
+    const restore = mockFetchSequence(calls, [
+      new Response(
+        JSON.stringify({
+          data: {
+            agentSession: {
+              activities: {
+                edges: [
+                  {
+                    node: {
+                      updatedAt: "2026-06-02T12:02:00.000Z",
+                      content: {
+                        __typename: "AgentActivityResponseContent",
+                        body: "First page response.",
+                      },
+                    },
+                  },
+                  {
+                    node: {
+                      updatedAt: "2026-06-02T12:01:00.000Z",
+                      content: {
+                        __typename: "AgentActivityPromptContent",
+                        body: "First page prompt.",
+                      },
+                    },
+                  },
+                ],
+                pageInfo: {
+                  hasNextPage: true,
+                  endCursor: "cursor-1",
+                },
+              },
+            },
+          },
+        }),
+        { status: 200 },
+      ),
+      new Response(
+        JSON.stringify({
+          data: {
+            agentSession: {
+              activities: {
+                edges: [
+                  {
+                    node: {
+                      updatedAt: "2026-06-02T12:03:00.000Z",
+                      content: {
+                        __typename: "AgentActivityThoughtContent",
+                        body: "Second page thought.",
+                      },
+                    },
+                  },
+                ],
+                pageInfo: {
+                  hasNextPage: true,
+                  endCursor: "cursor-2",
+                },
+              },
+            },
+          },
+        }),
+        { status: 200 },
+      ),
+    ]);
+    process.env.LINEAR_API_KEY = "lin_test";
+
+    try {
+      const activities = await listLinearAgentSessionActivities(
+        { ...config, linear: { ...config.linear, agentActivityHistoryLimit: 3 } },
+        "sess_1",
+        undefined,
+        2,
+      );
+
+      expect(activities).toEqual([
+        {
+          type: "prompt",
+          updatedAt: "2026-06-02T12:01:00.000Z",
+          body: "First page prompt.",
+        },
+        {
+          type: "response",
+          updatedAt: "2026-06-02T12:02:00.000Z",
+          body: "First page response.",
+        },
+        {
+          type: "thought",
+          updatedAt: "2026-06-02T12:03:00.000Z",
+          body: "Second page thought.",
+        },
+      ]);
+      expect(calls).toHaveLength(2);
+      expect(calls[0]).toMatchObject({
+        body: {
+          variables: {
+            id: "sess_1",
+            first: 2,
+            after: null,
+          },
+        },
+      });
+      expect(calls[1]).toMatchObject({
+        body: {
+          variables: {
+            id: "sess_1",
+            first: 1,
+            after: "cursor-1",
+          },
+        },
+      });
+    } finally {
+      restore();
+      delete process.env.LINEAR_API_KEY;
+    }
+  });
+
+  test("stops Linear Agent Session pagination when pageInfo is missing", async () => {
+    const calls: unknown[] = [];
+    const restore = mockFetchSequence(calls, [
+      new Response(
+        JSON.stringify({
+          data: {
+            agentSession: {
+              activities: {
+                edges: [
+                  {
+                    node: {
+                      updatedAt: "2026-06-02T12:01:00.000Z",
+                      content: {
+                        __typename: "AgentActivityPromptContent",
+                        body: "Only page.",
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+          },
+        }),
+        { status: 200 },
+      ),
+    ]);
+    process.env.LINEAR_API_KEY = "lin_test";
+
+    try {
+      const activities = await listLinearAgentSessionActivities(config, "sess_1");
+
+      expect(activities).toEqual([
+        {
+          type: "prompt",
+          updatedAt: "2026-06-02T12:01:00.000Z",
+          body: "Only page.",
+        },
+      ]);
+      expect(calls).toHaveLength(1);
+    } finally {
+      restore();
+      delete process.env.LINEAR_API_KEY;
+    }
+  });
+
+  test("stops Linear Agent Session pagination when next cursor is malformed", async () => {
+    const calls: unknown[] = [];
+    const restore = mockFetchSequence(calls, [
+      new Response(
+        JSON.stringify({
+          data: {
+            agentSession: {
+              activities: {
+                edges: [
+                  {
+                    node: {
+                      updatedAt: "2026-06-02T12:01:00.000Z",
+                      content: {
+                        __typename: "AgentActivityPromptContent",
+                        body: "No usable cursor.",
+                      },
+                    },
+                  },
+                ],
+                pageInfo: {
+                  hasNextPage: true,
+                  endCursor: null,
+                },
+              },
+            },
+          },
+        }),
+        { status: 200 },
+      ),
+    ]);
+    process.env.LINEAR_API_KEY = "lin_test";
+
+    try {
+      const activities = await listLinearAgentSessionActivities(config, "sess_1");
+
+      expect(activities).toEqual([
+        {
+          type: "prompt",
+          updatedAt: "2026-06-02T12:01:00.000Z",
+          body: "No usable cursor.",
+        },
+      ]);
+      expect(calls).toHaveLength(1);
+    } finally {
+      restore();
+      delete process.env.LINEAR_API_KEY;
+    }
+  });
+
+  test("stops Linear Agent Session pagination when next cursor repeats", async () => {
+    const calls: unknown[] = [];
+    const restore = mockFetchSequence(calls, [
+      new Response(
+        JSON.stringify({
+          data: {
+            agentSession: {
+              activities: {
+                edges: [
+                  {
+                    node: {
+                      updatedAt: "2026-06-02T12:01:00.000Z",
+                      content: {
+                        __typename: "AgentActivityPromptContent",
+                        body: "Repeated cursor page.",
+                      },
+                    },
+                  },
+                ],
+                pageInfo: {
+                  hasNextPage: true,
+                  endCursor: "cursor-1",
+                },
+              },
+            },
+          },
+        }),
+        { status: 200 },
+      ),
+      new Response(
+        JSON.stringify({
+          data: {
+            agentSession: {
+              activities: {
+                edges: [],
+                pageInfo: {
+                  hasNextPage: true,
+                  endCursor: "cursor-1",
+                },
+              },
+            },
+          },
+        }),
+        { status: 200 },
+      ),
+    ]);
+    process.env.LINEAR_API_KEY = "lin_test";
+
+    try {
+      const activities = await listLinearAgentSessionActivities(config, "sess_1");
+
+      expect(activities).toEqual([
+        {
+          type: "prompt",
+          updatedAt: "2026-06-02T12:01:00.000Z",
+          body: "Repeated cursor page.",
+        },
+      ]);
+      expect(calls).toHaveLength(2);
+    } finally {
+      restore();
+      delete process.env.LINEAR_API_KEY;
+    }
+  });
+
+  test("preserves Linear Agent Session activity fallback without an API token", async () => {
+    const calls: unknown[] = [];
+    const restore = mockFetchSequence(calls, []);
+    delete process.env.LINEAR_API_KEY;
+
+    try {
+      await expect(listLinearAgentSessionActivities(config, "sess_1")).resolves.toEqual([]);
+      expect(calls).toEqual([]);
+    } finally {
+      restore();
     }
   });
 
@@ -1052,7 +1346,7 @@ describe("Linear webhook handling", () => {
     }
   });
 
-  test("defaults Linear GraphQL API timeout below the first-response window", async () => {
+  test("defaults bounded Linear API settings", async () => {
     const dir = await mkdtemp(join(tmpdir(), "linear-config-"));
     const configPath = join(dir, "config.json");
     await writeFile(configPath, JSON.stringify({
@@ -1065,6 +1359,7 @@ describe("Linear webhook handling", () => {
     const loaded = await loadConfig(configPath);
 
     expect(loaded.linear.apiTimeoutMs).toBe(8_000);
+    expect(loaded.linear.agentActivityHistoryLimit).toBe(100);
   });
 
   test("times out stalled Linear GraphQL calls", async () => {

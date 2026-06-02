@@ -26,6 +26,7 @@ Edit `config.local.json`:
 - Set `linear.webhookSecretEnv`, `linear.apiKeyEnv`, `linear.oauthClientIdEnv`, and `linear.oauthClientSecretEnv`.
 - Keep the default `linear.webhookMaxAgeMs` unless your tunnel or proxy consistently delays Linear webhooks beyond 60 seconds.
 - Keep `linear.apiTimeoutMs` below Linear's first-response window; the default is 8000 ms.
+- Keep `linear.agentActivityHistoryLimit` bounded; the default is 100 Agent Activity records.
 - Set `linear.reviewStateName` if your team's pull-request review column is not named `In Review`.
 - Add one `repos` entry for each local checkout.
 - Add policy rules under `policies`.
@@ -70,7 +71,7 @@ https://your-public-host.example.com/oauth/linear/start
 
 Tetherbox redirects to Linear with `actor=app`, validates callback state, exchanges the OAuth code, and stores the app actor token in SQLite. Customer and initiative scopes are read-only by default; override `linear.oauthScopes` with an explicit full scope list that includes write-level customer or initiative scopes only if you intentionally extend Tetherbox to modify those records.
 That stored app user ID is also used to set the issue delegate when a session starts. If the delegated issue is still in backlog or another non-started state, Tetherbox moves it to the team's first started workflow state before queueing local Codex work. The local Codex prompt includes Linear issue text, comments, guidance, activity history, and structured workspace metadata such as projects, initiatives, customer requests, related issues, and linked documents when Linear includes those fields in the webhook payload.
-When API access is available, Tetherbox reads Agent Session activities and includes their frozen prompt/action/response history in the local Codex prompt so follow-up work is not dependent on editable comments alone.
+When API access is available, Tetherbox reads Agent Session activities across paginated Linear history and includes their frozen prompt/action/response history in the local Codex prompt so follow-up work is not dependent on editable comments alone. The history is capped by `linear.agentActivityHistoryLimit` to keep webhook intake predictable.
 Follow-up prompts for the same Agent Session are serialized behind the active session job before they continue the shared Codex thread. Jobs for different Agent Sessions still use the configured queue concurrency.
 Short-lived progress activities, including session receipt, queueing, and starting Codex, are marked ephemeral so Linear can replace them with later agent activity. Durable outcomes such as prompts, validation results, pull requests, errors, and final responses remain persistent.
 When `server.publicUrl` is configured, the first Agent Session update sets the current Linear `externalUrls` entry to the local Tetherbox job URL, and later routing/PR updates append additional links without replacing existing Linear links.
