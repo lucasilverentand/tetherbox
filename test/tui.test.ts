@@ -7,6 +7,7 @@ describe("TUI rendering", () => {
     const output = renderTui(stateFixture(), { view: "jobs", selectedJob: 0, selectedEvent: 0 }, options);
 
     expect(output).toContain("Daemon:");
+    expect(output).toContain("Linear: installed | app app-user-1");
     expect(output).toContain("Queue: accepting | running 1/2 | queued 1");
     expect(output).toContain("OSS-241");
     expect(output).toContain("c cancel");
@@ -47,6 +48,13 @@ function stateFixture(): DaemonState {
       concurrency: 2,
       running: 1,
       queued: 1,
+    },
+    linear: {
+      installed: true,
+      workspaceId: "default",
+      appUserId: "app-user-1",
+      scope: "read write app:assignable app:mentionable",
+      expiresAt: "2026-06-03T17:00:00.000Z",
     },
     jobs: [
       {

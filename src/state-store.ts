@@ -154,8 +154,9 @@ export class StateStore {
       .query("select * from job_events order by created_at desc, id desc limit 500")
       .all()
       .map((row) => eventFromRow(row as EventRow));
+    const linear = this.linearStatus();
 
-    return { startedAt, queue, jobs, events };
+    return { startedAt, linear, queue, jobs, events };
   }
 
   syncRepoMappings(repos: RepoMapping[]): void {
@@ -651,6 +652,21 @@ export class StateStore {
 
   deleteLinearInstallation(workspaceId = "default"): void {
     this.requireDb().query("delete from workspace_installations where workspace_id = ?").run(workspaceId);
+  }
+
+  private linearStatus(): NonNullable<DaemonState["linear"]> {
+    const installation = this.getLinearInstallation("default");
+    if (!installation) {
+      return { installed: false };
+    }
+
+    return {
+      installed: true,
+      workspaceId: installation.workspaceId,
+      ...(installation.appUserId ? { appUserId: installation.appUserId } : {}),
+      ...(installation.scope ? { scope: installation.scope } : {}),
+      ...(installation.expiresAt ? { expiresAt: installation.expiresAt } : {}),
+    };
   }
 
   claimWebhookDelivery(id: string, source = "linear"): boolean {

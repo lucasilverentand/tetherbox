@@ -211,6 +211,13 @@ export interface JobRecord {
 
 export interface DaemonState {
   startedAt: string;
+  linear?: {
+    installed: boolean;
+    workspaceId?: string;
+    appUserId?: string;
+    scope?: string;
+    expiresAt?: string;
+  };
   queue?: {
     accepting: boolean;
     concurrency: number;
