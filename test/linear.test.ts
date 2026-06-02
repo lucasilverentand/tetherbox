@@ -7,6 +7,7 @@ import {
   buildLinearJobPrompt,
   buildLinearOAuthAuthorizationUrl,
   completeLinearOAuthCallback,
+  getAgentActivitySignal,
   getAgentSessionAction,
   getIssueContext,
   getPrompt,
@@ -14,6 +15,7 @@ import {
   parseLinearAgentEvent,
   postLinearActivity,
   parseApprovalDecision,
+  isStopSignal,
   statusExternalUrl,
   updateLinearAgentSession,
   verifyLinearSignature,
@@ -63,6 +65,17 @@ describe("Linear webhook handling", () => {
   test("rejects malformed Linear webhook payloads", () => {
     expect(() => parseLinearAgentEvent("{not-json")).toThrow("Invalid Linear webhook JSON");
     expect(() => parseLinearAgentEvent("[]")).toThrow("Linear webhook payload must be a JSON object");
+  });
+
+  test("detects Agent Activity stop signals", () => {
+    const topLevel = parseLinearAgentEvent(JSON.stringify({ agentActivity: { signal: "stop" } }));
+    const contentLevel = parseLinearAgentEvent(JSON.stringify({ agentActivity: { content: { signal: "stop" } } }));
+    const ordinary = parseLinearAgentEvent(JSON.stringify({ agentActivity: { body: "Please continue" } }));
+
+    expect(getAgentActivitySignal(topLevel)).toBe("stop");
+    expect(isStopSignal(topLevel)).toBe(true);
+    expect(isStopSignal(contentLevel)).toBe(true);
+    expect(isStopSignal(ordinary)).toBe(false);
   });
 
   test("prefers promptContext and prompted activity bodies", () => {

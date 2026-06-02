@@ -104,6 +104,14 @@ export function getAgentSessionAction(event: LinearAgentSessionEvent): LinearAge
   return event.action === "created" || event.action === "prompted" ? event.action : undefined;
 }
 
+export function getAgentActivitySignal(event: LinearAgentSessionEvent): string | undefined {
+  return firstText(event.agentActivity?.signal, event.agentActivity?.content?.signal) || undefined;
+}
+
+export function isStopSignal(event: LinearAgentSessionEvent): boolean {
+  return getAgentActivitySignal(event) === "stop";
+}
+
 export function getPrompt(event: LinearAgentSessionEvent): string {
   return firstText(
     event.agentSession?.promptContext,
