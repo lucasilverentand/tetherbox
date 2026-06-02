@@ -11,7 +11,7 @@ import {
   verifyLinearSignature,
 } from "./linear";
 import { applyPolicy } from "./policy";
-import { routeRepo } from "./repo-router";
+import { routeRepoForSession } from "./repo-router";
 import { runJob } from "./job-runner";
 import { JobQueue } from "./job-queue";
 import { createJobId, StateStore } from "./state-store";
@@ -65,7 +65,7 @@ export async function serve(configPath: string): Promise<void> {
         const issue = getIssueContext(event);
         const prompt = getPrompt(event);
         const sessionId = getSessionId(event);
-        const repo = routeRepo(config, issue, prompt);
+        const repo = await routeRepoForSession(config, issue, prompt, sessionId);
         const policy = applyPolicy(config, issue, repo);
 
         const job = { id: createJobId(sessionId), sessionId, prompt, issue, repo, policy };
