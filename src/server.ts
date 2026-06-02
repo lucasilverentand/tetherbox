@@ -356,6 +356,7 @@ function shouldAttachLinearInboxNotificationToActiveJobs(event: LinearInboxNotif
     event.action === "issueMention" ||
     event.action === "issueCommentMention" ||
     event.action === "issueNewComment" ||
+    event.action === "issueAssignedToYou" ||
     event.action === "issueEmojiReaction" ||
     event.action === "issueCommentReaction"
   );
