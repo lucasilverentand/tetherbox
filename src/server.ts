@@ -2,10 +2,12 @@ import { loadConfig, getRequiredEnv } from "./config";
 import { assertSupportedCodexCli } from "./codex-version";
 import {
   buildLinearJobPrompt,
+  formatLinearManagementWebhookEvent,
   getAgentSessionAction,
   getIssueContext,
   getPrompt,
   getSessionId,
+  getLinearManagementWebhook,
   buildLinearOAuthAuthorizationUrl,
   completeLinearOAuthCallback,
   isStopSignal,
@@ -155,6 +157,17 @@ export function createRequestHandler(options: RequestHandlerOptions): (request: 
 
     try {
       const event = parseLinearAgentEvent(rawBody);
+      const managementWebhook = getLinearManagementWebhook(event);
+      if (managementWebhook) {
+        await handleLinearManagementWebhook(state, managementWebhook);
+        return Response.json({
+          ok: true,
+          accepted: true,
+          eventType: managementWebhook.type,
+          action: managementWebhook.action,
+        });
+      }
+
       const action = getAgentSessionAction(event);
       if (!action) {
         const reason = `Ignored unsupported Linear AgentSessionEvent action: ${event.action ?? "missing"}`;
@@ -183,6 +196,19 @@ export function createRequestHandler(options: RequestHandlerOptions): (request: 
       return Response.json({ error: message }, { status: 400 });
     }
   };
+}
+
+async function handleLinearManagementWebhook(
+  state: StateStore,
+  event: NonNullable<ReturnType<typeof getLinearManagementWebhook>>,
+): Promise<void> {
+  if (event.type === "OAuthApp" && event.action === "revoked") {
+    state.deleteLinearInstallation();
+    await state.addEvent("warn", formatLinearManagementWebhookEvent(event), undefined, "linear");
+    return;
+  }
+
+  await state.addEvent("info", formatLinearManagementWebhookEvent(event), undefined, "linear");
 }
 
 function isOperatorRequest(config: BridgeConfig, request: Request, url: URL): boolean {

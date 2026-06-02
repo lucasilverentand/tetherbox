@@ -76,6 +76,13 @@ export interface LinearAgentSessionEvent {
   type?: string;
   action?: string;
   organizationId?: string;
+  oauthClientId?: string;
+  appUserId?: string;
+  canAccessAllPublicTeams?: boolean;
+  addedTeamIds?: string[];
+  removedTeamIds?: string[];
+  webhookTimestamp?: number;
+  webhookId?: string;
   agentSession?: {
     id: string;
     issue?: LinearIssueContext;

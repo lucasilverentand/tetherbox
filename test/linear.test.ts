@@ -7,9 +7,11 @@ import {
   buildLinearJobPrompt,
   buildLinearOAuthAuthorizationUrl,
   completeLinearOAuthCallback,
+  formatLinearManagementWebhookEvent,
   getAgentActivitySignal,
   getAgentSessionAction,
   getIssueContext,
+  getLinearManagementWebhook,
   getPrompt,
   getSessionId,
   parseLinearAgentEvent,
@@ -62,6 +64,42 @@ describe("Linear webhook handling", () => {
     expect(getAgentSessionAction(parseLinearAgentEvent(JSON.stringify({ action: "prompted" })))).toBe("prompted");
     expect(getAgentSessionAction(parseLinearAgentEvent(JSON.stringify({ action: "permissionChanged" })))).toBeUndefined();
     expect(getAgentSessionAction(parseLinearAgentEvent(JSON.stringify({})))).toBeUndefined();
+  });
+
+  test("recognizes Linear management webhooks", () => {
+    const permissionChange = getLinearManagementWebhook(
+      parseLinearAgentEvent(
+        JSON.stringify({
+          type: "PermissionChange",
+          action: "teamAccessChanged",
+          appUserId: "app-user-1",
+          canAccessAllPublicTeams: true,
+          addedTeamIds: ["team-1", 42],
+          removedTeamIds: ["team-2"],
+        }),
+      ),
+    );
+    const revoked = getLinearManagementWebhook(
+      parseLinearAgentEvent(
+        JSON.stringify({
+          type: "OAuthApp",
+          action: "revoked",
+        }),
+      ),
+    );
+
+    expect(permissionChange).toEqual({
+      type: "PermissionChange",
+      action: "teamAccessChanged",
+      appUserId: "app-user-1",
+      canAccessAllPublicTeams: true,
+      addedTeamIds: ["team-1"],
+      removedTeamIds: ["team-2"],
+    });
+    expect(formatLinearManagementWebhookEvent(permissionChange!)).toContain("added teams: team-1");
+    expect(formatLinearManagementWebhookEvent(permissionChange!)).toContain("removed teams: team-2");
+    expect(revoked).toEqual({ type: "OAuthApp", action: "revoked" });
+    expect(formatLinearManagementWebhookEvent(revoked!)).toContain("OAuth app was revoked");
   });
 
   test("rejects malformed Linear webhook payloads", () => {

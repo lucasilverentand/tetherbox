@@ -49,6 +49,20 @@ export interface LinearAgentSessionActivity {
   result?: string;
 }
 
+export type LinearManagementWebhook =
+  | {
+      type: "PermissionChange";
+      action: "teamAccessChanged";
+      appUserId?: string;
+      canAccessAllPublicTeams: boolean;
+      addedTeamIds: string[];
+      removedTeamIds: string[];
+    }
+  | {
+      type: "OAuthApp";
+      action: "revoked";
+    };
+
 export type LinearApprovalDecision = "approve" | "deny";
 export type LinearAgentSessionAction = "created" | "prompted";
 
@@ -126,6 +140,44 @@ export function getSessionId(event: LinearAgentSessionEvent): string {
 
 export function getAgentSessionAction(event: LinearAgentSessionEvent): LinearAgentSessionAction | undefined {
   return event.action === "created" || event.action === "prompted" ? event.action : undefined;
+}
+
+export function getLinearManagementWebhook(event: LinearAgentSessionEvent): LinearManagementWebhook | undefined {
+  if (event.type === "PermissionChange" && event.action === "teamAccessChanged") {
+    return {
+      type: "PermissionChange",
+      action: "teamAccessChanged",
+      ...(event.appUserId ? { appUserId: event.appUserId } : {}),
+      canAccessAllPublicTeams: event.canAccessAllPublicTeams === true,
+      addedTeamIds: Array.isArray(event.addedTeamIds) ? event.addedTeamIds.filter(isString) : [],
+      removedTeamIds: Array.isArray(event.removedTeamIds) ? event.removedTeamIds.filter(isString) : [],
+    };
+  }
+
+  if (event.type === "OAuthApp" && event.action === "revoked") {
+    return {
+      type: "OAuthApp",
+      action: "revoked",
+    };
+  }
+
+  return undefined;
+}
+
+export function formatLinearManagementWebhookEvent(event: LinearManagementWebhook): string {
+  if (event.type === "OAuthApp") {
+    return "Linear OAuth app was revoked; removed stored installation token and local issue delegation will require reinstalling the app.";
+  }
+
+  const added = event.addedTeamIds.length ? event.addedTeamIds.join(", ") : "none";
+  const removed = event.removedTeamIds.length ? event.removedTeamIds.join(", ") : "none";
+  const allPublic = event.canAccessAllPublicTeams ? "enabled" : "disabled";
+  return [
+    "Linear app team access changed",
+    `all public teams: ${allPublic}`,
+    `added teams: ${added}`,
+    `removed teams: ${removed}`,
+  ].join("; ");
 }
 
 export function getAgentActivitySignal(event: LinearAgentSessionEvent): string | undefined {
@@ -663,6 +715,10 @@ function linearActivityInput(agentSessionId: string, activity: LinearActivityCon
 
 function firstText(...values: Array<string | undefined>): string {
   return values.find((value) => value?.trim()) ?? "";
+}
+
+function isString(value: unknown): value is string {
+  return typeof value === "string";
 }
 
 function formatComment(comment: NonNullable<LinearAgentSessionEvent["comment"]>): string {
