@@ -137,7 +137,7 @@ Routing order:
 3. Static `linearTeams` mapping.
 4. The only configured repo, when there is exactly one.
 
-If routing is ambiguous, Tetherbox asks Linear for a repository selection instead of guessing.
+If routing is ambiguous, Tetherbox asks Linear for a repository selection instead of guessing. Users can pick one of the offered repositories or reply with a clear repository name such as `lucasilverentand/api`, a GitHub URL, or a unique configured repo name like `api`. Ambiguous free-text replies ask for selection again.
 
 ## Policy Config
 
