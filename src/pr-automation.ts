@@ -9,6 +9,7 @@ export interface PullRequestResult {
   url?: string;
   number?: number;
   warnings?: string[];
+  validation?: ValidationCommandResult[];
 }
 
 export interface PullRequestCheckResult {
@@ -22,10 +23,34 @@ export interface CommandResult {
   stderr: string;
 }
 
+export interface ValidationCommandResult extends CommandResult {
+  command: string;
+  status: "passed" | "failed";
+  summary: string;
+}
+
 export interface CommandRunner {
   run(command: string, args: string[], cwd: string): Promise<CommandResult>;
   runShell(command: string, cwd: string): Promise<CommandResult>;
   fileExists?(path: string): Promise<boolean>;
+}
+
+export class CommandExecutionError extends Error {
+  constructor(
+    message: string,
+    readonly result: CommandResult,
+  ) {
+    super(message);
+    this.name = "CommandExecutionError";
+  }
+}
+
+export class ValidationFailedError extends Error {
+  constructor(readonly results: ValidationCommandResult[]) {
+    const failed = results.find((result) => result.status === "failed");
+    super(`Validation command failed: ${failed?.command ?? "unknown"}`);
+    this.name = "ValidationFailedError";
+  }
 }
 
 export async function finalizeSuccessfulRun(
@@ -35,14 +60,11 @@ export async function finalizeSuccessfulRun(
   runner: CommandRunner = new ProcessCommandRunner(),
 ): Promise<PullRequestResult> {
   const warnings: string[] = [];
-
-  for (const command of job.repo.testCommands ?? []) {
-    await runner.runShell(command, worktree.path);
-  }
+  const validation = await runValidationCommands(job, worktree, runner);
 
   const status = await runner.run("git", ["status", "--porcelain"], worktree.path);
   if (!status.stdout.trim()) {
-    return { status: "no_changes", warnings };
+    return { status: "no_changes", warnings, validation };
   }
 
   await runner.run("git", ["add", "--all"], worktree.path);
@@ -73,6 +95,7 @@ export async function finalizeSuccessfulRun(
     url,
     number: url ? Number(url.match(/\/pull\/(\d+)/)?.[1]) || undefined : undefined,
     warnings,
+    validation,
   };
 }
 
@@ -182,6 +205,61 @@ function commitArgs(job: RoutedJob, sign = false): string[] {
   ];
 }
 
+async function runValidationCommands(
+  job: RoutedJob,
+  worktree: WorktreeInfo,
+  runner: CommandRunner,
+): Promise<ValidationCommandResult[]> {
+  const results: ValidationCommandResult[] = [];
+
+  for (const command of job.repo.testCommands ?? []) {
+    try {
+      const result = await runner.runShell(command, worktree.path);
+      results.push(validationResult(command, "passed", result));
+    } catch (error) {
+      results.push(validationResult(command, "failed", commandResultFromError(error)));
+      throw new ValidationFailedError(results);
+    }
+  }
+
+  return results;
+}
+
+function validationResult(
+  command: string,
+  status: ValidationCommandResult["status"],
+  result: CommandResult,
+): ValidationCommandResult {
+  return {
+    command,
+    status,
+    stdout: result.stdout,
+    stderr: result.stderr,
+    summary: summarizeCommandOutput(result),
+  };
+}
+
+function commandResultFromError(error: unknown): CommandResult {
+  if (error instanceof CommandExecutionError) {
+    return error.result;
+  }
+
+  return {
+    stdout: "",
+    stderr: error instanceof Error ? error.message : String(error),
+  };
+}
+
+function summarizeCommandOutput(result: CommandResult): string {
+  const output = [result.stdout, result.stderr].filter((value) => value.trim()).join("\n").trim();
+  if (!output) {
+    return "No output.";
+  }
+
+  const lines = output.split(/\r?\n/).slice(-8).join("\n");
+  return lines.length > 2_000 ? `${lines.slice(0, 1_997)}...` : lines;
+}
+
 async function fileExists(runner: CommandRunner, path: string): Promise<boolean> {
   if (runner.fileExists) {
     return runner.fileExists(path);
@@ -268,7 +346,12 @@ async function runProcess(command: string, args: string[], cwd: string, shell: b
       if (code === 0) {
         resolve({ stdout, stderr });
       } else {
-        reject(new Error(`${command} ${args.join(" ")} failed: ${stderr.trim() || stdout.trim()}`));
+        reject(
+          new CommandExecutionError(`${command} ${args.join(" ")} failed: ${stderr.trim() || stdout.trim()}`, {
+            stdout,
+            stderr,
+          }),
+        );
       }
     });
   });
