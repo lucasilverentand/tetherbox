@@ -79,7 +79,7 @@ After successful implementation, created or updated GitHub pull requests are add
 Set Linear's webhook signing secret in the env var named by `linear.webhookSecretEnv`.
 
 Tetherbox verifies `Linear-Signature` with HMAC-SHA256 over the raw request body. Invalid signatures are rejected before parsing JSON.
-Agent Session webhooks can queue or steer local Codex jobs. Inbox Notification webhooks record local audit events for direct app-user involvement, and `issueUnassignedFromYou` cancels matching active local jobs. Permission-change webhooks only record local audit events, and OAuth app revocation webhooks remove the stored app actor token so the daemon will require reinstall before it can post Linear activity or update delegated issues again.
+Agent Session webhooks can queue or steer local Codex jobs. Inbox Notification webhooks record local audit events for direct app-user involvement; `issueUnassignedFromYou` and terminal `issueStatusChanged` notifications cancel matching active local jobs. Permission-change webhooks only record local audit events, and OAuth app revocation webhooks remove the stored app actor token so the daemon will require reinstall before it can post Linear activity or update delegated issues again.
 
 ## Tunnel Options
 
