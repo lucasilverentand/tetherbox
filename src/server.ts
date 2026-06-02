@@ -159,6 +159,11 @@ export function createRequestHandler(options: RequestHandlerOptions): (request: 
 
     try {
       const event = parseLinearAgentEvent(rawBody);
+      const timestampError = linearWebhookTimestampError(event, config.linear.webhookMaxAgeMs);
+      if (timestampError) {
+        await state.addEvent("warn", timestampError.message, undefined, "linear");
+        return Response.json({ error: timestampError.message, reason: timestampError.reason }, { status: 401 });
+      }
       const managementWebhook = getLinearManagementWebhook(event);
       if (managementWebhook) {
         await handleLinearManagementWebhook(state, managementWebhook);
@@ -210,6 +215,35 @@ export function createRequestHandler(options: RequestHandlerOptions): (request: 
       return Response.json({ error: message }, { status: 400 });
     }
   };
+}
+
+const DEFAULT_LINEAR_WEBHOOK_MAX_AGE_MS = 60_000;
+
+function linearWebhookTimestampError(
+  event: { webhookTimestamp?: unknown },
+  maxAgeMs = DEFAULT_LINEAR_WEBHOOK_MAX_AGE_MS,
+  now = Date.now(),
+): { reason: "missing_webhook_timestamp" | "invalid_webhook_timestamp" | "stale_webhook"; message: string } | undefined {
+  const timestamp = event.webhookTimestamp;
+  if (timestamp === undefined || timestamp === null) {
+    return {
+      reason: "missing_webhook_timestamp",
+      message: "Linear webhook missing webhookTimestamp",
+    };
+  }
+  if (!Number.isFinite(timestamp) || typeof timestamp !== "number") {
+    return {
+      reason: "invalid_webhook_timestamp",
+      message: "Linear webhook has invalid webhookTimestamp",
+    };
+  }
+  if (Math.abs(now - timestamp) > maxAgeMs) {
+    return {
+      reason: "stale_webhook",
+      message: "Linear webhook timestamp is outside the accepted freshness window",
+    };
+  }
+  return undefined;
 }
 
 async function handleLinearManagementWebhook(

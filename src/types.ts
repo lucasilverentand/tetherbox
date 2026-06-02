@@ -20,6 +20,7 @@ export interface BridgeConfig {
   };
   linear: {
     webhookSecretEnv: string;
+    webhookMaxAgeMs?: number;
     apiKeyEnv?: string;
     repositorySuggestionMinConfidence?: number;
     oauthClientIdEnv?: string;

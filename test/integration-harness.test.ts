@@ -127,7 +127,7 @@ async function createHarness(options: {
   const harness = {
     state,
     sendLinearWebhook(event: unknown): Promise<Response> {
-      const body = JSON.stringify(event);
+      const body = JSON.stringify({ webhookTimestamp: Date.now(), ...(event as Record<string, unknown>) });
       return handler(
         new Request("http://127.0.0.1:8787/webhooks/linear", {
           method: "POST",

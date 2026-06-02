@@ -16,6 +16,7 @@
   },
   "linear": {
     "webhookSecretEnv": "LINEAR_WEBHOOK_SECRET",
+    "webhookMaxAgeMs": 60000,
     "apiKeyEnv": "LINEAR_API_KEY",
     "repositorySuggestionMinConfidence": 0.2,
     "oauthClientIdEnv": "LINEAR_CLIENT_ID",
