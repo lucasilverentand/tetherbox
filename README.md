@@ -44,6 +44,7 @@ bun run src/index.ts daemon --config config.local.json
 ```
 
 The daemon listens on the configured host and port. Use a tunnel such as Cloudflare Tunnel, Tailscale Funnel, or ngrok during development so Linear can reach `/webhooks/linear`.
+Set `server.publicUrl` to the externally reachable tunnel URL when you want Linear Agent Sessions to link back to Tetherbox status.
 
 Open the terminal UI in another shell:
 
@@ -82,6 +83,8 @@ Run the daemon as the same user that owns Codex auth, GitHub auth, SSH keys, and
 
 ## Linear Webhook
 
+Create a Linear OAuth application for the agent and install it with `actor=app`. Request `app:assignable` so issues can be delegated to the agent and `app:mentionable` so users can mention it in comments, documents, and other editor surfaces. Enable the Agent session events webhook category.
+
 Configure the Linear agent app webhook URL:
 
 ```text
@@ -89,6 +92,7 @@ https://your-public-host.example.com/webhooks/linear
 ```
 
 The bridge verifies `Linear-Signature` with HMAC-SHA256 over the raw request body.
+Set `LINEAR_API_KEY` (or the env var named by `linear.apiKeyEnv`) to the app actor token. When configured, Tetherbox emits Linear Agent Activities for thoughts, actions, responses, errors, and elicitation prompts, and updates the Agent Session plan/external URL. Without the token, those calls are logged locally as a dry-run fallback.
 
 ## Design
 

@@ -1,7 +1,8 @@
 {
   "server": {
     "host": "127.0.0.1",
-    "port": 8787
+    "port": 8787,
+    "publicUrl": "https://tetherbox.example.com"
   },
   "state": {
     "path": "state/daemon.sqlite",

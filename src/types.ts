@@ -6,6 +6,7 @@ export interface BridgeConfig {
   server: {
     host: string;
     port: number;
+    publicUrl?: string;
   };
   state?: {
     path: string;
@@ -64,10 +65,45 @@ export interface LinearAgentSessionEvent {
   agentSession?: {
     id: string;
     issue?: LinearIssueContext;
+    comment?: LinearCommentContext;
+    previousComments?: LinearCommentContext[];
+    guidance?: LinearGuidanceContext[];
+    promptContext?: string;
     prompt?: string;
   };
+  agentActivity?: {
+    id?: string;
+    body?: string;
+    content?: {
+      type?: string;
+      body?: string;
+    };
+  };
   issue?: LinearIssueContext;
+  comment?: LinearCommentContext;
+  previousComments?: LinearCommentContext[];
+  guidance?: LinearGuidanceContext[];
+  promptContext?: string;
   prompt?: string;
+}
+
+export interface LinearCommentContext {
+  id?: string;
+  body?: string;
+  url?: string;
+  createdAt?: string;
+  user?: {
+    id?: string;
+    name?: string;
+    url?: string;
+  };
+}
+
+export interface LinearGuidanceContext {
+  id?: string;
+  body?: string;
+  origin?: string;
+  teamName?: string;
 }
 
 export interface RoutedJob {
