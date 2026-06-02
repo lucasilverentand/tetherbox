@@ -29,6 +29,9 @@ export async function loadConfig(path: string): Promise<BridgeConfig> {
       shutdownGraceMs: parsed.queue?.shutdownGraceMs ?? 30_000,
       approvalTimeoutMs: parsed.queue?.approvalTimeoutMs ?? 24 * 60 * 60 * 1000,
     },
+    git: {
+      signingKeyPath: parsed.git?.signingKeyPath ?? "~/.ssh/codex_signing_key",
+    },
     policies: parsed.policies ?? [],
   } as BridgeConfig;
 }

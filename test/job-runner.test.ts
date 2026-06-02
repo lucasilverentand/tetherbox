@@ -44,6 +44,34 @@ describe("runJob", () => {
     expect(state.getSessionThreadId("session-1")).toBe("thread-plan");
     state.close();
   });
+
+  test("records commit signing warnings without blocking completed jobs", async () => {
+    const state = new StateStore(await statePath());
+    await state.load();
+    await state.createJob(autoJob);
+    const client = new FakeCodexClient();
+
+    const result = await runJob(config, autoJob, state, {
+      createClient: () => client,
+      prepareWorktree: async () => worktree,
+      finalizeRun: async () => ({
+        status: "no_changes",
+        warnings: ["Git signing key not found at /tmp/key; created an unsigned commit."],
+      }),
+    });
+    const event = state.snapshot().events.find((candidate) => candidate.source === "git");
+    state.close();
+
+    expect(result).toEqual({
+      status: "completed",
+      message: "Codex turn completed",
+    });
+    expect(event).toMatchObject({
+      level: "warn",
+      message: "Git signing key not found at /tmp/key; created an unsigned commit.",
+      jobId: "job-2",
+    });
+  });
 });
 
 async function statePath(): Promise<string> {
@@ -78,6 +106,21 @@ const planOnlyJob: RoutedJob = {
     decision: "allow_plan_only",
     sandbox: "workspace-write",
   },
+};
+
+const autoJob: RoutedJob = {
+  ...planOnlyJob,
+  id: "job-2",
+  policy: {
+    ruleName: "docs-auto",
+    decision: "allow_auto",
+    sandbox: "workspace-write",
+  },
+};
+
+const worktree = {
+  branchName: "oss-233-create-signed-co-authored-commits",
+  path: "/tmp/worktree",
 };
 
 class FakeCodexClient {

@@ -128,6 +128,10 @@ export async function runJob(
       actionParameter: job.repo.github,
     });
     const pullRequest = await (options.finalizeRun ?? finalizeSuccessfulRun)(config, job, worktree);
+    for (const warning of pullRequest.warnings ?? []) {
+      await state.addEvent("warn", warning, job.id, "git");
+      await postActivity(config, state, job, { type: "thought", body: warning });
+    }
     if (pullRequest.status === "created") {
       state.savePullRequest({
         jobId: job.id,
