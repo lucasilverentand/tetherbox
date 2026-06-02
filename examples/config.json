@@ -19,7 +19,9 @@
     "bin": "codex",
     "model": "gpt-5.5",
     "sandbox": "workspace-write",
-    "minSupportedVersion": "0.135.0"
+    "minSupportedVersion": "0.135.0",
+    "appServerStartupTimeoutMs": 30000,
+    "turnTimeoutMs": 1800000
   },
   "repos": [
     {

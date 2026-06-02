@@ -27,7 +27,13 @@ export async function runJob(
     return { status: "waiting_approval", message: "Approval required before running local Codex" };
   }
 
-  const client = new CodexAppServerClient(config.codex.bin);
+  const client = new CodexAppServerClient(config.codex.bin, {
+    startupTimeoutMs: config.codex.appServerStartupTimeoutMs,
+    turnTimeoutMs: config.codex.turnTimeoutMs,
+    onLifecycleEvent: (event) => {
+      void state.addEvent(event.level, event.message, job.id);
+    },
+  });
   const stopOnCancel = () => client.stop();
 
   try {

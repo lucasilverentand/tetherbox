@@ -24,6 +24,8 @@ export interface BridgeConfig {
     model?: string;
     sandbox: SandboxMode;
     minSupportedVersion?: string;
+    appServerStartupTimeoutMs?: number;
+    turnTimeoutMs?: number;
   };
   repos: RepoMapping[];
   policies: PolicyRule[];
