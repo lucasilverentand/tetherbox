@@ -1,4 +1,5 @@
 import { loadConfig, getRequiredEnv } from "./config";
+import { assertSupportedCodexCli } from "./codex-version";
 import { getIssueContext, getPrompt, getSessionId, parseLinearAgentEvent, verifyLinearSignature } from "./linear";
 import { applyPolicy } from "./policy";
 import { routeRepo } from "./repo-router";
@@ -8,6 +9,7 @@ import { createJobId, StateStore } from "./state-store";
 
 export async function serve(configPath: string): Promise<void> {
   const config = await loadConfig(configPath);
+  await assertSupportedCodexCli(config.codex.bin, config.codex.minSupportedVersion);
   const webhookSecret = getRequiredEnv(config.linear.webhookSecretEnv);
   const state = new StateStore(config.state?.path ?? "state/daemon.sqlite");
   await state.load();
