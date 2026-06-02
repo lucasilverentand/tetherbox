@@ -526,7 +526,7 @@ async function intakeLinearWebhook(options: LinearWebhookIntakeOptions): Promise
   }
 
   await safeUpdateLinearAgentSession(config, state, sessionId, {
-    ...(externalUrl ? { addedExternalUrls: [externalUrl] } : {}),
+    ...(externalUrl ? { externalUrls: [externalUrl] } : {}),
     plan: [
       { content: "Acknowledge Linear session", status: "completed" },
       { content: "Route Linear context to a local repository", status: "inProgress" },
