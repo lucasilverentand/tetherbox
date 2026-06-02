@@ -322,6 +322,124 @@ describe("server webhook handling", () => {
     }
   });
 
+  test("records Linear app-user notification webhooks without queueing work", async () => {
+    const state = await loadedState();
+    const queue = new FakeQueue();
+    const handler = createRequestHandler({
+      config,
+      state,
+      queue,
+      webhookSecret: "secret",
+    });
+    const body = JSON.stringify({
+      type: "AppUserNotification",
+      action: "issueCommentMention",
+      appUserId: "app-user-1",
+      notification: {
+        issue: {
+          id: "issue-1",
+          identifier: "OSS-256",
+          title: "Handle notification webhooks",
+          url: "https://linear.app/seventwo/issue/OSS-256",
+        },
+      },
+    });
+
+    try {
+      const response = await handler(
+        new Request("http://127.0.0.1:8787/webhooks/linear", {
+          method: "POST",
+          headers: { "Linear-Signature": signature(body, "secret") },
+          body,
+        }),
+      );
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        ok: true,
+        accepted: true,
+        eventType: "AppUserNotification",
+        action: "issueCommentMention",
+        canceledJobIds: [],
+      });
+      expect(queue.jobs).toHaveLength(0);
+      expect(state.snapshot().jobs).toHaveLength(0);
+      expect(state.snapshot().events[0]).toMatchObject({
+        level: "info",
+        source: "linear",
+        message: expect.stringContaining("issueCommentMention"),
+      });
+      expect(state.snapshot().events[0]?.message).toContain("OSS-256");
+    } finally {
+      state.close();
+    }
+  });
+
+  test("cancels matching active jobs from Linear app-user unassignment notifications", async () => {
+    const state = await loadedState();
+    const queue = new FakeQueue(state);
+    const queuedJob = jobFixture({
+      id: "job-queued",
+      sessionId: "sess_queued",
+      issue: { id: "issue-1", identifier: "OSS-256", title: "Handle notification webhooks", labels: [] },
+    });
+    await state.createJob(queuedJob);
+    queue.jobs.push(queuedJob);
+    await state.createJob(jobFixture({
+      id: "job-waiting",
+      sessionId: "sess_waiting",
+      issue: { id: "issue-1", identifier: "OSS-256", title: "Handle notification webhooks", labels: [] },
+    }));
+    await state.updateJob("job-waiting", "waiting_approval", "Approval required");
+    state.createApproval("job-waiting", "Run local Codex");
+    await state.createJob(jobFixture({
+      id: "job-running",
+      sessionId: "sess_running",
+      issue: { id: "issue-1", identifier: "OSS-256", title: "Handle notification webhooks", labels: [] },
+    }));
+    await state.updateJob("job-running", "running", "Job started");
+    const handler = createRequestHandler({
+      config,
+      state,
+      queue,
+      webhookSecret: "secret",
+    });
+    const body = JSON.stringify({
+      type: "AppUserNotification",
+      action: "issueUnassignedFromYou",
+      appUserId: "app-user-1",
+      notification: {
+        issue: {
+          id: "issue-1",
+          identifier: "OSS-256",
+          title: "Handle notification webhooks",
+        },
+      },
+    });
+
+    try {
+      const response = await handler(
+        new Request("http://127.0.0.1:8787/webhooks/linear", {
+          method: "POST",
+          headers: { "Linear-Signature": signature(body, "secret") },
+          body,
+        }),
+      );
+
+      expect(response.status).toBe(200);
+      const payload = await response.json() as { canceledJobIds: string[] };
+      expect(new Set(payload.canceledJobIds)).toEqual(new Set(["job-queued", "job-waiting", "job-running"]));
+      expect(queue.jobs).toHaveLength(0);
+      expect(state.getJob("job-queued")?.status).toBe("canceled");
+      expect(state.getJob("job-waiting")?.status).toBe("canceled");
+      expect(state.getJob("job-running")?.status).toBe("canceled");
+      expect(state.getPendingApprovalForJob("job-waiting")).toBeUndefined();
+      expect(state.snapshot().events.some((event) => event.message.includes("unassigned from the issue"))).toBe(true);
+    } finally {
+      state.close();
+    }
+  });
+
   test("rejects malformed Linear webhook JSON without queueing jobs", async () => {
     const state = await loadedState();
     const queue = new FakeQueue();

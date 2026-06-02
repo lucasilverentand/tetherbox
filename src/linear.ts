@@ -63,6 +63,18 @@ export type LinearManagementWebhook =
       action: "revoked";
     };
 
+export interface LinearInboxNotificationWebhook {
+  type: "AppUserNotification";
+  action: string;
+  appUserId?: string;
+  issue?: {
+    id?: string;
+    identifier?: string;
+    title?: string;
+    url?: string;
+  };
+}
+
 export type LinearApprovalDecision = "approve" | "deny";
 export type LinearAgentSessionAction = "created" | "prompted";
 
@@ -178,6 +190,34 @@ export function formatLinearManagementWebhookEvent(event: LinearManagementWebhoo
     `added teams: ${added}`,
     `removed teams: ${removed}`,
   ].join("; ");
+}
+
+export function getLinearInboxNotificationWebhook(event: LinearAgentSessionEvent): LinearInboxNotificationWebhook | undefined {
+  if (event.type !== "AppUserNotification") {
+    return undefined;
+  }
+
+  return {
+    type: "AppUserNotification",
+    action: event.action || "unknown",
+    ...(event.appUserId ? { appUserId: event.appUserId } : {}),
+    ...definedIssue(extractNotificationIssue(event.notification)),
+  };
+}
+
+export function formatLinearInboxNotificationWebhookEvent(event: LinearInboxNotificationWebhook): string {
+  const issueParts = [
+    event.issue?.identifier,
+    event.issue?.title,
+    event.issue?.url,
+    event.issue?.id && !event.issue.identifier ? event.issue.id : undefined,
+  ].filter(Boolean);
+  return [
+    `Linear app-user notification: ${event.action}`,
+    issueParts.length ? `issue: ${issueParts.join(" / ")}` : undefined,
+  ]
+    .filter(Boolean)
+    .join("; ");
 }
 
 export function getAgentActivitySignal(event: LinearAgentSessionEvent): string | undefined {
@@ -719,6 +759,37 @@ function firstText(...values: Array<string | undefined>): string {
 
 function isString(value: unknown): value is string {
   return typeof value === "string";
+}
+
+function extractNotificationIssue(value: unknown): LinearInboxNotificationWebhook["issue"] | undefined {
+  const notification = recordValue(value);
+  if (!notification) {
+    return undefined;
+  }
+
+  const issue = recordValue(notification.issue) ?? recordValue(notification.issueSnapshot);
+  const result = {
+    ...definedText("id", stringField(issue ?? notification, "id") ?? stringField(notification, "issueId")),
+    ...definedText("identifier", stringField(issue ?? notification, "identifier") ?? stringField(notification, "issueIdentifier")),
+    ...definedText("title", stringField(issue ?? notification, "title") ?? stringField(notification, "issueTitle")),
+    ...definedText("url", stringField(issue ?? notification, "url") ?? stringField(notification, "issueUrl")),
+  };
+
+  return Object.keys(result).length ? result : undefined;
+}
+
+function definedIssue(
+  issue: LinearInboxNotificationWebhook["issue"] | undefined,
+): Pick<LinearInboxNotificationWebhook, "issue"> | Record<string, never> {
+  return issue ? { issue } : {};
+}
+
+function recordValue(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+}
+
+function definedText<K extends string>(key: K, value: string | undefined): Record<K, string> | Record<string, never> {
+  return value ? { [key]: value } as Record<K, string> : {};
 }
 
 function formatComment(comment: NonNullable<LinearAgentSessionEvent["comment"]>): string {

@@ -182,6 +182,32 @@ describe("StateStore", () => {
     });
   });
 
+  test("lists active jobs for a Linear issue", async () => {
+    const path = await statePath();
+    const store = new StateStore(path);
+    await store.load();
+    await store.createJob(jobFixture());
+    await store.createJob({
+      ...jobFixture(),
+      id: "job-2",
+      sessionId: "session-2",
+      issue: {
+        id: "issue-1",
+        identifier: "ENG-1",
+        title: "Fix it again",
+        labels: ["docs"],
+      },
+    });
+    await store.updateJob("job-2", "completed", "Done");
+
+    const byId = store.listActiveJobsForIssue({ id: "issue-1" });
+    const byIdentifier = store.listActiveJobsForIssue({ identifier: "ENG-1" });
+    store.close();
+
+    expect(byId.map((job) => job.id)).toEqual(["job-1"]);
+    expect(byIdentifier.map((job) => job.id)).toEqual(["job-1"]);
+  });
+
   test("creates and resolves pending approvals", async () => {
     const path = await statePath();
     const store = new StateStore(path);
