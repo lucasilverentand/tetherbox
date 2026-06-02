@@ -160,6 +160,25 @@ describe("StateStore", () => {
     });
   });
 
+  test("creates and resolves pending approvals", async () => {
+    const path = await statePath();
+    const store = new StateStore(path);
+    await store.load();
+    await store.createJob(jobFixture());
+
+    const approval = store.createApproval("job-1", "Run local Codex");
+    expect(approval).toMatchObject({
+      jobId: "job-1",
+      requestedAction: "Run local Codex",
+      status: "pending",
+    });
+    expect(store.getPendingApprovalForSession("session-1")?.id).toBe(approval.id);
+
+    store.resolveApproval(approval.id, "approved", "Luca");
+    expect(store.getPendingApprovalForSession("session-1")).toBeUndefined();
+    store.close();
+  });
+
   test("syncs repo mappings durably", async () => {
     const path = await statePath();
     const repo: RepoMapping = {

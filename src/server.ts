@@ -6,6 +6,7 @@ import {
   getSessionId,
   buildLinearOAuthAuthorizationUrl,
   completeLinearOAuthCallback,
+  parseApprovalDecision,
   parseLinearAgentEvent,
   postLinearActivity,
   statusExternalUrl,
@@ -146,6 +147,16 @@ async function intakeLinearWebhook(options: LinearWebhookIntakeOptions): Promise
   const issue = getIssueContext(event);
   const prompt = getPrompt(event);
   const externalUrl = statusExternalUrl(config, jobId);
+  const handledApproval = await maybeHandleApprovalReply({
+    config,
+    state,
+    queue,
+    sessionId,
+    prompt,
+  });
+  if (handledApproval) {
+    return;
+  }
 
   await safeUpdateLinearAgentSession(config, state, sessionId, {
     ...(externalUrl ? { externalUrls: [externalUrl] } : {}),
@@ -196,6 +207,80 @@ async function intakeLinearWebhook(options: LinearWebhookIntakeOptions): Promise
       body: `Could not queue local job: ${message}`,
     }, jobId);
   }
+}
+
+async function maybeHandleApprovalReply(options: {
+  config: BridgeConfig;
+  state: StateStore;
+  queue: Pick<JobQueue, "enqueue">;
+  sessionId: string;
+  prompt: string;
+}): Promise<boolean> {
+  const { config, state, queue, sessionId, prompt } = options;
+  const pending = state.getPendingApprovalForSession(sessionId);
+  if (!pending) {
+    return false;
+  }
+
+  const decision = parseApprovalDecision(prompt);
+  if (!decision) {
+    await safePostLinearActivity(config, state, sessionId, {
+      type: "elicitation",
+      body: "Please reply `approve` to continue or `deny` to cancel this local Codex run.",
+    }, pending.jobId);
+    return true;
+  }
+
+  const record = state.getJob(pending.jobId);
+  if (!record) {
+    state.resolveApproval(pending.id, "denied");
+    await state.addEvent("error", "Approval target job no longer exists", pending.jobId);
+    return true;
+  }
+
+  if (decision === "deny") {
+    state.resolveApproval(pending.id, "denied");
+    await state.updateJob(record.id, "canceled", "Canceled by Linear approval reply");
+    await safePostLinearActivity(config, state, sessionId, {
+      type: "response",
+      body: "Canceled the local Codex run.",
+    }, record.id);
+    return true;
+  }
+
+  const repo = config.repos.find((candidate) => candidate.github === record.repo);
+  if (!repo) {
+    state.resolveApproval(pending.id, "denied");
+    await state.updateJob(record.id, "failed", `Could not resume approved job; repo ${record.repo} is not configured`, {
+      failureReason: "Missing repo mapping for approved job",
+      retryEligible: false,
+    });
+    return true;
+  }
+
+  state.resolveApproval(pending.id, "approved");
+  await state.updateJob(record.id, "queued", "Approved in Linear; queued for local Codex");
+  await safePostLinearActivity(config, state, sessionId, {
+    type: "thought",
+    body: "Approval received. Continuing the local Codex run.",
+  }, record.id);
+  queue.enqueue({
+    id: record.id,
+    sessionId: record.sessionId,
+    prompt: record.prompt ?? prompt,
+    issue: {
+      identifier: record.issueIdentifier,
+      title: record.issueTitle,
+      labels: [],
+    },
+    repo,
+    policy: {
+      ruleName: `${record.policyRule}:approved`,
+      decision: "allow_auto",
+      sandbox: config.codex.sandbox,
+    },
+  });
+  return true;
 }
 
 async function safeUpdateLinearAgentSession(

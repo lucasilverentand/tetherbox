@@ -79,6 +79,70 @@ describe("server webhook handling", () => {
       delete process.env.LINEAR_API_KEY;
     }
   });
+
+  test("resumes a waiting approval job from an approve prompt", async () => {
+    process.env.LINEAR_API_KEY = "lin_test";
+    const fetchMock = mockDeferredFetch();
+    const state = await loadedState();
+    const queue = new FakeQueue();
+    await state.createJob({
+      id: "job-1",
+      sessionId: "sess_1",
+      prompt: "Original issue context",
+      issue: {
+        identifier: "OSS-1",
+        title: "Fix this",
+        labels: [],
+      },
+      repo: config.repos[0]!,
+      policy: {
+        ruleName: "default-require-approval",
+        decision: "require_approval",
+        sandbox: "workspace-write",
+      },
+    });
+    await state.updateJob("job-1", "waiting_approval", "Approval required");
+    const approval = state.createApproval("job-1", "Run local Codex");
+    const handler = createRequestHandler({
+      config,
+      state,
+      queue,
+      webhookSecret: "secret",
+    });
+    const body = JSON.stringify({
+      agentSession: { id: "sess_1" },
+      agentActivity: { body: "approve" },
+    });
+
+    try {
+      const response = await handler(
+        new Request("http://127.0.0.1:8787/webhooks/linear", {
+          method: "POST",
+          headers: { "Linear-Signature": signature(body, "secret") },
+          body,
+        }),
+      );
+      expect(response.status).toBe(200);
+      await waitFor(() => fetchMock.pending.length === 1);
+      fetchMock.resolveNext({ data: { agentActivityCreate: { success: true } } });
+      await waitFor(() => queue.jobs.length === 1);
+
+      expect(queue.jobs[0]).toMatchObject({
+        id: "job-1",
+        prompt: "Original issue context",
+        policy: {
+          decision: "allow_auto",
+          ruleName: "default-require-approval:approved",
+        },
+      });
+      expect(state.getPendingApprovalForSession("sess_1")).toBeUndefined();
+      expect(state.getJob("job-1")?.status).toBe("queued");
+    } finally {
+      fetchMock.restore();
+      state.close();
+      delete process.env.LINEAR_API_KEY;
+    }
+  });
 });
 
 const config: BridgeConfig = {

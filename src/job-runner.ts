@@ -27,9 +27,10 @@ export async function runJob(
   }
 
   if (job.policy.decision === "require_approval") {
+    state.createApproval(job.id, "Run local Codex");
     await postActivity(config, state, job, {
       type: "elicitation",
-      body: "Approval required before running local Codex.",
+      body: "Approval required before running local Codex. Reply `approve` to continue or `deny` to cancel.",
     });
     return { status: "waiting_approval", message: "Approval required before running local Codex" };
   }

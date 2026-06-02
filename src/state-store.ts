@@ -10,6 +10,7 @@ interface JobRow {
   session_id: string;
   status: JobStatus;
   repo: string;
+  prompt: string | null;
   branch_name: string | null;
   worktree_path: string | null;
   issue_identifier: string | null;
@@ -71,6 +72,20 @@ interface OAuthStateRow {
   state: string;
   redirect_uri: string;
   expires_at: string;
+}
+
+export interface PendingApprovalRecord {
+  id: string;
+  jobId: string;
+  requestedAction: string;
+  status: "pending" | "approved" | "denied";
+}
+
+interface PendingApprovalRow {
+  id: string;
+  job_id: string;
+  requested_action: string;
+  status: "pending" | "approved" | "denied";
 }
 
 export interface JobUpdateOptions {
@@ -151,6 +166,7 @@ export class StateStore {
       sessionId: job.sessionId,
       status: "queued",
       repo: job.repo.github,
+      prompt: job.prompt,
       issueIdentifier: job.issue.identifier,
       issueTitle: job.issue.title,
       policyRule: job.policy.ruleName,
@@ -186,12 +202,13 @@ export class StateStore {
       );
       db.query(
         `insert into jobs (
-          id, session_id, status, repo, issue_identifier, issue_title, policy_rule,
+          id, session_id, status, repo, prompt, issue_identifier, issue_title, policy_rule,
           policy_decision, created_at, updated_at, last_message, retry_eligible, retry_count
-        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         on conflict(id) do update set
           status = excluded.status,
           repo = excluded.repo,
+          prompt = excluded.prompt,
           issue_identifier = excluded.issue_identifier,
           issue_title = excluded.issue_title,
           policy_rule = excluded.policy_rule,
@@ -209,6 +226,7 @@ export class StateStore {
         record.sessionId,
         record.status,
         record.repo,
+        job.prompt,
         record.issueIdentifier ?? null,
         record.issueTitle ?? null,
         record.policyRule,
@@ -229,7 +247,7 @@ export class StateStore {
     const db = this.requireDb();
     const now = new Date().toISOString();
     const startedAt = status === "running" ? now : null;
-    const completedAt = status === "completed" || status === "denied" || status === "waiting_approval" ? now : null;
+    const completedAt = status === "completed" || status === "denied" ? now : null;
     const canceledAt = status === "canceled" ? now : null;
     const retryEligible = options.retryEligible === undefined ? null : Number(options.retryEligible);
     const retryIncrement = options.incrementRetryCount ? 1 : 0;
@@ -290,6 +308,56 @@ export class StateStore {
     }
 
     await this.addEvent("info", `Prepared worktree ${worktree.branchName}`, id);
+  }
+
+  getJob(id: string): JobRecord | undefined {
+    const row = this.requireDb().query("select * from jobs where id = ?").get(id) as JobRow | null;
+    return row ? jobFromRow(row) : undefined;
+  }
+
+  createApproval(jobId: string, requestedAction: string): PendingApprovalRecord {
+    const now = new Date().toISOString();
+    const id = `${jobId}:approval`;
+    this.requireDb()
+      .query(
+        `insert into approvals (
+          id, job_id, requested_action, status, created_at, updated_at
+        ) values (?, ?, ?, 'pending', ?, ?)
+        on conflict(id) do update set
+          requested_action = excluded.requested_action,
+          status = 'pending',
+          updated_at = excluded.updated_at`,
+      )
+      .run(id, jobId, requestedAction, now, now);
+    return { id, jobId, requestedAction, status: "pending" };
+  }
+
+  getPendingApprovalForSession(sessionId: string): PendingApprovalRecord | undefined {
+    const row = this.requireDb()
+      .query(
+        `select approvals.id, approvals.job_id, approvals.requested_action, approvals.status
+         from approvals
+         inner join jobs on jobs.id = approvals.job_id
+         where jobs.session_id = ? and approvals.status = 'pending'
+         order by approvals.updated_at desc
+         limit 1`,
+      )
+      .get(sessionId) as PendingApprovalRow | null;
+
+    return row
+      ? {
+          id: row.id,
+          jobId: row.job_id,
+          requestedAction: row.requested_action,
+          status: row.status,
+        }
+      : undefined;
+  }
+
+  resolveApproval(id: string, status: "approved" | "denied", approver?: string): void {
+    this.requireDb()
+      .query("update approvals set status = ?, approver = ?, updated_at = ? where id = ?")
+      .run(status, approver ?? null, new Date().toISOString(), id);
   }
 
   getSessionThreadId(sessionId: string): string | undefined {
@@ -470,6 +538,7 @@ export class StateStore {
         session_id text not null references sessions(id) on delete cascade,
         status text not null,
         repo text not null,
+        prompt text,
         branch_name text,
         worktree_path text,
         issue_identifier text,
@@ -522,6 +591,7 @@ export class StateStore {
       create index if not exists idx_job_events_created_at on job_events(created_at);
       create index if not exists idx_job_events_job_id on job_events(job_id);
     `);
+    this.addColumnIfMissing("jobs", "prompt", "text");
   }
 
   private ensureStartedAt(): void {
@@ -554,6 +624,16 @@ export class StateStore {
     }
     return this.db;
   }
+
+  private addColumnIfMissing(table: string, column: string, definition: string): void {
+    try {
+      this.requireDb().exec(`alter table ${table} add column ${column} ${definition}`);
+    } catch (error) {
+      if (!String(error).includes("duplicate column name")) {
+        throw error;
+      }
+    }
+  }
 }
 
 export function createJobId(sessionId: string): string {
@@ -566,6 +646,7 @@ function jobFromRow(row: JobRow): JobRecord {
     sessionId: row.session_id,
     status: row.status,
     repo: row.repo,
+    prompt: row.prompt ?? undefined,
     branchName: row.branch_name ?? undefined,
     worktreePath: row.worktree_path ?? undefined,
     issueIdentifier: row.issue_identifier ?? undefined,
