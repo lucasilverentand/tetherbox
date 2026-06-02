@@ -95,6 +95,7 @@ The bridge verifies `Linear-Signature` with HMAC-SHA256 over the raw request bod
 Set `LINEAR_API_KEY` (or the env var named by `linear.apiKeyEnv`) to the app actor token. When configured, Tetherbox emits Linear Agent Activities for thoughts, actions, responses, errors, and elicitation prompts, and updates the Agent Session plan/external URL. Without the token, those calls are logged locally as a dry-run fallback.
 
 When a webhook includes an issue ID, Tetherbox asks Linear's repository suggestion API to rank the configured candidate repos using the issue, session, guidance, and Linear context. Explicit repo mentions still win; low-confidence or unavailable suggestions fall back to the static team mapping. Tune the threshold with `linear.repositorySuggestionMinConfidence`.
+Follow-up `prompted` Agent Session events reuse the Codex thread ID stored for that Linear session, so user replies continue the same local Codex conversation.
 
 ## Design
 

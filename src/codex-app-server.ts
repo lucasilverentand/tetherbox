@@ -34,6 +34,7 @@ interface PendingRequest {
 export interface CodexTurnOptions {
   cwd: string;
   input: string;
+  threadId?: string;
   model?: string;
   sandbox: SandboxMode;
   onNotification?: (notification: CodexNotification) => void;
@@ -117,18 +118,19 @@ export class CodexAppServerClient {
     this.notify("initialized", {});
   }
 
-  async runTurn(options: CodexTurnOptions): Promise<void> {
+  async runTurn(options: CodexTurnOptions): Promise<string> {
     await this.start();
     this.activeNotificationHandler = options.onNotification;
 
-    const thread = (await this.request("thread/start", {
-      model: options.model,
-      cwd: options.cwd,
-      sandbox: options.sandbox,
-    })) as { thread?: { id?: string } };
+    const thread =
+      options.threadId ??
+      ((await this.request("thread/start", {
+        model: options.model,
+        cwd: options.cwd,
+        sandbox: options.sandbox,
+      })) as { thread?: { id?: string } }).thread?.id;
 
-    const threadId = thread.thread?.id;
-    if (!threadId) {
+    if (!thread) {
       throw new CodexAppServerError("missing_thread_id", "Codex app-server did not return a thread id");
     }
 
@@ -137,7 +139,7 @@ export class CodexAppServerClient {
     });
 
     await this.request("turn/start", {
-      threadId,
+      threadId: thread,
       input: [{ type: "text", text: options.input }],
       cwd: options.cwd,
       sandbox: options.sandbox,
@@ -156,6 +158,7 @@ export class CodexAppServerClient {
       }
       throw error;
     }
+    return thread;
   }
 
   stop(): void {

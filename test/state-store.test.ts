@@ -67,6 +67,22 @@ describe("StateStore", () => {
     expect(snapshot.jobs[0]?.worktreePath).toEndWith(join("worktrees", "job-1"));
   });
 
+  test("persists Codex thread IDs for Linear sessions", async () => {
+    const path = await statePath();
+    const store = new StateStore(path);
+    await store.load();
+
+    await store.createJob(jobFixture());
+    expect(store.getSessionThreadId("session-1")).toBeUndefined();
+    await store.setSessionThreadId("session-1", "thread-1", "job-1");
+    store.close();
+
+    const reloaded = new StateStore(path);
+    await reloaded.load();
+    expect(reloaded.getSessionThreadId("session-1")).toBe("thread-1");
+    reloaded.close();
+  });
+
   test("syncs repo mappings durably", async () => {
     const path = await statePath();
     const repo: RepoMapping = {

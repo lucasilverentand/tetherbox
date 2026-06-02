@@ -9,7 +9,7 @@ describe("CodexAppServerClient", () => {
     const notifications: string[] = [];
     const client = new CodexAppServerClient(await fakeCodex("success"));
 
-    await client.runTurn({
+    const threadId = await client.runTurn({
       cwd: "/tmp",
       input: "hello",
       sandbox: "workspace-write",
@@ -21,7 +21,22 @@ describe("CodexAppServerClient", () => {
     });
     client.stop();
 
+    expect(threadId).toBe("thread-1");
     expect(notifications).toContain("turn/completed");
+  });
+
+  test("continues an existing thread without starting a new one", async () => {
+    const client = new CodexAppServerClient(await fakeCodex("resume-thread"));
+
+    const threadId = await client.runTurn({
+      cwd: "/tmp",
+      input: "follow up",
+      threadId: "thread-42",
+      sandbox: "workspace-write",
+    });
+    client.stop();
+
+    expect(threadId).toBe("thread-42");
   });
 
   test("fails startup with a structured timeout reason", async () => {
@@ -132,6 +147,9 @@ lines.on("line", (line) => {
     return;
   }
   if (message.method === "thread/start") {
+    if (scenario === "resume-thread") {
+      process.exit(8);
+    }
     if (scenario === "request-error") {
       console.log(JSON.stringify({ id: message.id, error: { message: "thread failed" } }));
       return;
