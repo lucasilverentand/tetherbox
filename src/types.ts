@@ -49,6 +49,9 @@ export interface PolicyRule {
   name: string;
   labels?: string[];
   paths?: string[];
+  repos?: string[];
+  teams?: string[];
+  priorities?: number[];
   decision: PolicyDecision;
   sandbox?: SandboxMode;
 }
@@ -60,6 +63,7 @@ export interface LinearIssueContext {
   description?: string;
   teamKey?: string;
   labels: string[];
+  priority?: number | { value?: number; name?: string };
   url?: string;
 }
 

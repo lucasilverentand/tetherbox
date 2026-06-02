@@ -105,6 +105,18 @@ https://your-public-host.example.com/oauth/linear/start
 
 Tetherbox redirects to Linear with `actor=app`, validates the callback state, exchanges the authorization code, stores the app actor token in SQLite, and refreshes stored tokens before GraphQL calls when needed.
 
+## Policy Config
+
+Configure policy rules under `policies` in config order. The first matching rule wins, and every matcher present on a rule must match. Supported matchers are:
+
+- `labels`: Linear label names.
+- `paths`: repo-relative globs found in the issue title, description, or prompt text.
+- `repos`: GitHub repo full names such as `lucasilverentand/example`.
+- `teams`: Linear team keys.
+- `priorities`: Linear priority numbers.
+
+Supported decisions are `allow_auto`, `allow_plan_only`, `require_approval`, and `deny`. The applied policy rule and decision are persisted with each job for `/api/status` and the TUI, and the runner posts the applied policy back to Linear as activity.
+
 ## Design
 
 See [docs/design.md](docs/design.md).

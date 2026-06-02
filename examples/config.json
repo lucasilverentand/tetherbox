@@ -41,14 +41,22 @@
     {
       "name": "docs-auto",
       "labels": ["docs"],
+      "repos": ["lucasilverentand/example"],
+      "teams": ["ENG"],
       "decision": "allow_auto",
       "sandbox": "workspace-write"
     },
     {
       "name": "security-plan-only",
       "labels": ["security"],
+      "priorities": [2, 3],
       "decision": "allow_plan_only",
       "sandbox": "workspace-write"
+    },
+    {
+      "name": "infra-needs-approval",
+      "paths": ["infra/**", "terraform/**", "k8s/**"],
+      "decision": "require_approval"
     }
   ]
 }

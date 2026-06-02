@@ -78,6 +78,95 @@ describe("policy and repo routing", () => {
     expect(decision.decision).toBe("allow_auto");
   });
 
+  test("evaluates policy rules deterministically in config order", () => {
+    const repo = config.repos[0]!;
+    const decision = applyPolicy(
+      {
+        ...config,
+        policies: [
+          { name: "first-docs", labels: ["docs"], decision: "require_approval" },
+          { name: "second-docs", labels: ["docs"], decision: "allow_auto" },
+        ],
+      },
+      { teamKey: "ENG", labels: ["docs"] },
+      repo,
+    );
+
+    expect(decision.ruleName).toBe("first-docs");
+    expect(decision.decision).toBe("require_approval");
+  });
+
+  test("matches policy rules by repo, team, and priority", () => {
+    const repo = config.repos[0]!;
+    const decision = applyPolicy(
+      {
+        ...config,
+        policies: [
+          {
+            name: "oss-normal-plan",
+            repos: ["lucasilverentand/example"],
+            teams: ["OSS"],
+            priorities: [3],
+            decision: "allow_plan_only",
+          },
+        ],
+      },
+      { teamKey: "OSS", labels: [], priority: { value: 3, name: "Medium" } },
+      repo,
+    );
+
+    expect(decision.ruleName).toBe("oss-normal-plan");
+    expect(decision.decision).toBe("allow_plan_only");
+  });
+
+  test("requires all configured policy matchers to match", () => {
+    const repo = config.repos[0]!;
+    const decision = applyPolicy(
+      {
+        ...config,
+        policies: [
+          {
+            name: "security-on-other-repo",
+            labels: ["security"],
+            repos: ["lucasilverentand/other"],
+            decision: "deny",
+          },
+        ],
+      },
+      { teamKey: "ENG", labels: ["security"] },
+      repo,
+    );
+
+    expect(decision.ruleName).toBe("default-require-approval");
+    expect(decision.decision).toBe("require_approval");
+  });
+
+  test("matches policy paths from issue text and prompt context", () => {
+    const repo = config.repos[0]!;
+    const decision = applyPolicy(
+      {
+        ...config,
+        policies: [
+          {
+            name: "infra-needs-approval",
+            paths: ["infra/**", "terraform/**"],
+            decision: "require_approval",
+          },
+        ],
+      },
+      {
+        teamKey: "ENG",
+        labels: [],
+        description: "Update the release notes.",
+      },
+      repo,
+      { prompt: "Please change infra/prod/service.yaml and explain the rollout." },
+    );
+
+    expect(decision.ruleName).toBe("infra-needs-approval");
+    expect(decision.decision).toBe("require_approval");
+  });
+
   test("requires approval by default", () => {
     const repo = config.repos[0]!;
     const decision = applyPolicy(config, { teamKey: "ENG", labels: [] }, repo);
