@@ -211,12 +211,13 @@ export class StateStore {
     db.transaction(() => {
       db.query(
         `insert into sessions (
-          id, issue_id, issue_identifier, issue_title, repo, status, created_at, updated_at
-        ) values (?, ?, ?, ?, ?, ?, ?, ?)
+          id, issue_id, issue_identifier, issue_title, issue_team_id, repo, status, created_at, updated_at
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?)
         on conflict(id) do update set
           issue_id = excluded.issue_id,
           issue_identifier = excluded.issue_identifier,
           issue_title = excluded.issue_title,
+          issue_team_id = excluded.issue_team_id,
           repo = excluded.repo,
           status = excluded.status,
           updated_at = excluded.updated_at`,
@@ -225,6 +226,7 @@ export class StateStore {
         job.issue.id ?? null,
         job.issue.identifier ?? null,
         job.issue.title ?? null,
+        job.issue.teamId ?? null,
         job.repo.github,
         "active",
         now,
@@ -383,6 +385,26 @@ export class StateStore {
           issue.id ?? null,
           issue.id ?? null,
         ) as JobRow[]
+    ).map((row) => jobFromRow(row));
+  }
+
+  listActiveJobsForTeamIds(teamIds: readonly string[]): JobRecord[] {
+    const normalized = [...new Set(teamIds.map((teamId) => teamId.trim()).filter(Boolean))];
+    if (!normalized.length) {
+      return [];
+    }
+
+    const placeholders = normalized.map(() => "?").join(", ");
+    return (
+      this.requireDb()
+        .query(
+          `select jobs.* from jobs
+           inner join sessions on sessions.id = jobs.session_id
+           where jobs.status in ('queued', 'running', 'waiting_approval')
+             and sessions.issue_team_id in (${placeholders})
+           order by jobs.updated_at desc, jobs.created_at desc`,
+        )
+        .all(...normalized) as JobRow[]
     ).map((row) => jobFromRow(row));
   }
 
@@ -723,6 +745,7 @@ export class StateStore {
         issue_id text,
         issue_identifier text,
         issue_title text,
+        issue_team_id text,
         repo text not null,
         codex_thread_id text,
         status text not null,
@@ -804,6 +827,7 @@ export class StateStore {
       create index if not exists idx_processed_webhooks_received_at on processed_webhooks(received_at);
     `);
     this.addColumnIfMissing("jobs", "prompt", "text");
+    this.addColumnIfMissing("sessions", "issue_team_id", "text");
     this.addColumnIfMissing("approvals", "expires_at", "text");
     this.addColumnIfMissing("job_events", "source", "text not null default 'daemon'");
   }
