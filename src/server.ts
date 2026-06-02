@@ -185,8 +185,8 @@ export function createRequestHandler(options: RequestHandlerOptions): (request: 
   };
 }
 
-function isOperatorRequest(config: BridgeConfig, request: Request, url: URL): boolean {
-  if (url.hostname === "127.0.0.1" || url.hostname === "localhost" || url.hostname === "::1") {
+function isOperatorRequest(config: BridgeConfig, request: Request, _url: URL): boolean {
+  if (isLoopbackHost(config.server.host)) {
     return true;
   }
 
@@ -199,6 +199,11 @@ function isOperatorRequest(config: BridgeConfig, request: Request, url: URL): bo
   const authorization = request.headers.get("Authorization");
   const headerToken = request.headers.get("X-Tetherbox-Operator-Token");
   return authorization === `Bearer ${expected}` || headerToken === expected;
+}
+
+function isLoopbackHost(host: string): boolean {
+  const normalized = host.toLowerCase();
+  return normalized === "127.0.0.1" || normalized === "localhost" || normalized === "::1";
 }
 
 async function retryJobFromApi(
