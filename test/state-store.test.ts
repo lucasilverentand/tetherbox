@@ -52,6 +52,22 @@ describe("StateStore", () => {
     expect(snapshot.events.every((event) => event.source)).toBe(true);
   });
 
+  test("persists Linear workspace IDs on jobs and repo selections", async () => {
+    const path = await statePath();
+    const store = new StateStore(path);
+    await store.load();
+
+    await store.createJob({ ...jobFixture(), linearWorkspaceId: "org-1" });
+    store.createRepoSelection({ ...jobFixture(), id: "job-2", sessionId: "session-2", linearWorkspaceId: "org-2" });
+    store.close();
+
+    const reloaded = new StateStore(path);
+    await reloaded.load();
+    expect(reloaded.getJob("job-1")?.linearWorkspaceId).toBe("org-1");
+    expect(reloaded.getPendingRepoSelectionForSession("session-2")?.linearWorkspaceId).toBe("org-2");
+    reloaded.close();
+  });
+
   test("redacts persisted audit events and stores their source", async () => {
     const path = await statePath();
     const store = new StateStore(path);

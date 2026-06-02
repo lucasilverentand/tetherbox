@@ -10,6 +10,7 @@ import {
   getPrompt,
   getSessionId,
   getLinearManagementWebhook,
+  linearWorkspaceIdForEvent,
   buildLinearOAuthAuthorizationUrl,
   completeLinearOAuthCallback,
   isStopSignal,
@@ -175,9 +176,10 @@ export function createRequestHandler(options: RequestHandlerOptions): (request: 
           deliveryId,
         });
       }
+      const linearWorkspaceId = linearWorkspaceIdForEvent(event);
       const managementWebhook = getLinearManagementWebhook(event);
       if (managementWebhook) {
-        const canceledJobIds = await handleLinearManagementWebhook(state, queue, managementWebhook);
+        const canceledJobIds = await handleLinearManagementWebhook(state, queue, managementWebhook, linearWorkspaceId);
         return Response.json({
           ok: true,
           accepted: true,
@@ -212,13 +214,13 @@ export function createRequestHandler(options: RequestHandlerOptions): (request: 
       }
       const sessionId = getSessionId(event);
       if (action === "prompted" && isStopSignal(event)) {
-        void handleLinearStopSignal({ config, state, queue, sessionId }).catch((error) => {
+        void handleLinearStopSignal({ config, state, queue, sessionId, linearWorkspaceId }).catch((error) => {
           console.error("Linear stop signal handling failed", error);
         });
         return Response.json({ ok: true, accepted: true, sessionId, stop: true });
       }
       const jobId = createJobId(sessionId);
-      void intakeLinearWebhook({ config, state, queue, event, sessionId, jobId }).catch((error) => {
+      void intakeLinearWebhook({ config, state, queue, event, sessionId, jobId, linearWorkspaceId }).catch((error) => {
         console.error("Linear webhook intake failed", error);
       });
       return Response.json({ ok: true, accepted: true, sessionId, jobId });
@@ -275,9 +277,10 @@ async function handleLinearManagementWebhook(
   state: StateStore,
   queue: Pick<JobQueue, "cancel">,
   event: NonNullable<ReturnType<typeof getLinearManagementWebhook>>,
+  linearWorkspaceId?: string,
 ): Promise<string[]> {
   if (event.type === "OAuthApp" && event.action === "revoked") {
-    state.deleteLinearInstallation();
+    state.deleteLinearInstallation(linearWorkspaceId ?? "default");
     await state.addEvent("warn", formatLinearManagementWebhookEvent(event), undefined, "linear");
     return [];
   }
@@ -524,6 +527,7 @@ function routedJobFromRecord(
   return {
     id: record.id,
     sessionId: record.sessionId,
+    linearWorkspaceId: record.linearWorkspaceId,
     prompt: record.prompt ?? "",
     issue: {
       identifier: record.issueIdentifier,
@@ -546,10 +550,11 @@ interface LinearWebhookIntakeOptions {
   event: ReturnType<typeof parseLinearAgentEvent>;
   sessionId: string;
   jobId: string;
+  linearWorkspaceId?: string;
 }
 
 async function intakeLinearWebhook(options: LinearWebhookIntakeOptions): Promise<void> {
-  const { config, state, queue, event, sessionId, jobId } = options;
+  const { config, state, queue, event, sessionId, jobId, linearWorkspaceId } = options;
   const issue = getIssueContext(event);
   const replyPrompt = getPrompt(event);
   const externalUrl = statusExternalUrl(config, jobId);
@@ -559,6 +564,7 @@ async function intakeLinearWebhook(options: LinearWebhookIntakeOptions): Promise
     queue,
     sessionId,
     prompt: replyPrompt,
+    linearWorkspaceId,
   });
   if (handledApproval) {
     return;
@@ -570,6 +576,7 @@ async function intakeLinearWebhook(options: LinearWebhookIntakeOptions): Promise
     event,
     sessionId,
     prompt: replyPrompt,
+    linearWorkspaceId,
   });
   if (handledRepoSelection) {
     return;
@@ -583,23 +590,23 @@ async function intakeLinearWebhook(options: LinearWebhookIntakeOptions): Promise
       { content: "Run Codex locally in an isolated worktree", status: "pending" },
       { content: "Report the result back to Linear", status: "pending" },
     ],
-  }, undefined);
+  }, undefined, linearWorkspaceId);
   await safePostLinearActivity(config, state, sessionId, {
     content: {
       type: "thought",
       body: `Received Linear session ${sessionId}; routing local job ${jobId}.`,
     },
     ephemeral: true,
-  }, undefined);
-  await safeSyncLinearIssueLifecycle(config, state, issue);
+  }, undefined, linearWorkspaceId);
+  await safeSyncLinearIssueLifecycle(config, state, issue, linearWorkspaceId);
 
   let prompt = buildLinearJobPrompt(event);
   try {
-    const activities = await safeListLinearAgentSessionActivities(config, state, sessionId);
+    const activities = await safeListLinearAgentSessionActivities(config, state, sessionId, linearWorkspaceId);
     prompt = buildLinearJobPrompt(event, activities);
-    const repo = await routeRepoForSession(config, issue, prompt, sessionId, state);
+    const repo = await routeRepoForSession(config, issue, prompt, sessionId, state, linearWorkspaceId);
     const policy = applyPolicy(config, issue, repo, { prompt });
-    const job: RoutedJob = { id: jobId, sessionId, prompt, issue, repo, policy };
+    const job: RoutedJob = { id: jobId, sessionId, linearWorkspaceId, prompt, issue, repo, policy };
     await state.createJob(job);
     await safeUpdateLinearAgentSession(config, state, sessionId, {
       plan: [
@@ -608,19 +615,19 @@ async function intakeLinearWebhook(options: LinearWebhookIntakeOptions): Promise
         { content: "Run Codex locally in an isolated worktree", status: "pending" },
         { content: "Report the result back to Linear", status: "pending" },
       ],
-    }, jobId);
+    }, jobId, linearWorkspaceId);
     await safePostLinearActivity(config, state, sessionId, {
       content: {
         type: "thought",
         body: `Queued local Tetherbox job ${job.id} for ${repo.github}.`,
       },
       ephemeral: true,
-    }, jobId);
+    }, jobId, linearWorkspaceId);
     queue.enqueue(job);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Linear webhook intake failed";
     if (message === "Could not route Linear issue to a local repository") {
-      state.createRepoSelection({ id: jobId, sessionId, prompt, issue });
+      state.createRepoSelection({ id: jobId, sessionId, linearWorkspaceId, prompt, issue });
       await safeUpdateLinearAgentSession(config, state, sessionId, {
         plan: [
           { content: "Acknowledge Linear session", status: "completed" },
@@ -628,8 +635,8 @@ async function intakeLinearWebhook(options: LinearWebhookIntakeOptions): Promise
           { content: "Run Codex locally in an isolated worktree", status: "pending" },
           { content: "Report the result back to Linear", status: "pending" },
         ],
-      }, undefined);
-      await postRepoSelection(config, state, sessionId, config.repos);
+      }, undefined, linearWorkspaceId);
+      await postRepoSelection(config, state, sessionId, config.repos, jobId, linearWorkspaceId);
       return;
     }
     await state.addEvent("error", message, undefined, "linear");
@@ -640,11 +647,11 @@ async function intakeLinearWebhook(options: LinearWebhookIntakeOptions): Promise
         { content: "Run Codex locally in an isolated worktree", status: "canceled" },
         { content: "Report the result back to Linear", status: "completed" },
       ],
-    }, undefined);
+    }, undefined, linearWorkspaceId);
     await safePostLinearActivity(config, state, sessionId, {
       type: "error",
       body: `Could not queue local job: ${message}`,
-    }, undefined);
+    }, undefined, linearWorkspaceId);
   }
 }
 
@@ -653,8 +660,9 @@ async function handleLinearStopSignal(options: {
   state: StateStore;
   queue: Pick<JobQueue, "cancel">;
   sessionId: string;
+  linearWorkspaceId?: string;
 }): Promise<void> {
-  const { config, state, queue, sessionId } = options;
+  const { config, state, queue, sessionId, linearWorkspaceId } = options;
   const activeJob = state.getActiveJobForSession(sessionId);
   if (!activeJob) {
     await state.addEvent(
@@ -681,11 +689,11 @@ async function handleLinearStopSignal(options: {
       { content: "Run Codex locally", status: "canceled" },
       { content: "Report the result back to Linear", status: "completed" },
     ],
-  }, activeJob.id);
+  }, activeJob.id, activeJob.linearWorkspaceId ?? linearWorkspaceId);
   await safePostLinearActivity(config, state, sessionId, {
     type: "error",
     body: "Stopped the local Codex run.",
-  }, activeJob.id);
+  }, activeJob.id, activeJob.linearWorkspaceId ?? linearWorkspaceId);
 }
 
 async function maybeHandleRepoSelectionReply(options: {
@@ -695,8 +703,9 @@ async function maybeHandleRepoSelectionReply(options: {
   event: ReturnType<typeof parseLinearAgentEvent>;
   sessionId: string;
   prompt: string;
+  linearWorkspaceId?: string;
 }): Promise<boolean> {
-  const { config, state, queue, event, sessionId, prompt } = options;
+  const { config, state, queue, event, sessionId, prompt, linearWorkspaceId } = options;
   const pending = state.getPendingRepoSelectionForSession(sessionId);
   if (!pending) {
     return false;
@@ -704,15 +713,17 @@ async function maybeHandleRepoSelectionReply(options: {
 
   const selectedRepo = repoFromSelectionReply(config, event, prompt);
   if (!selectedRepo) {
-    await postRepoSelection(config, state, sessionId, config.repos, pending.jobId);
+    await postRepoSelection(config, state, sessionId, config.repos, pending.jobId, pending.linearWorkspaceId ?? linearWorkspaceId);
     return true;
   }
 
   state.resolveRepoSelection(pending.id, "resolved", selectedRepo.github);
   const policy = applyPolicy(config, pending.issue, selectedRepo, { prompt: pending.prompt });
+  const jobLinearWorkspaceId = pending.linearWorkspaceId ?? linearWorkspaceId;
   const job: RoutedJob = {
     id: pending.jobId,
     sessionId,
+    linearWorkspaceId: jobLinearWorkspaceId,
     prompt: pending.prompt,
     issue: pending.issue,
     repo: selectedRepo,
@@ -726,14 +737,14 @@ async function maybeHandleRepoSelectionReply(options: {
       { content: "Run Codex locally in an isolated worktree", status: "pending" },
       { content: "Report the result back to Linear", status: "pending" },
     ],
-  }, pending.jobId);
+  }, pending.jobId, jobLinearWorkspaceId);
   await safePostLinearActivity(config, state, sessionId, {
     content: {
       type: "thought",
       body: `Queued local Tetherbox job ${job.id} for ${selectedRepo.github}.`,
     },
     ephemeral: true,
-  }, pending.jobId);
+  }, pending.jobId, jobLinearWorkspaceId);
   queue.enqueue(job);
   return true;
 }
@@ -743,6 +754,8 @@ async function postRepoSelection(
   state: StateStore,
   sessionId: string,
   repos: RepoMapping[],
+  jobId?: string,
+  linearWorkspaceId?: string,
 ): Promise<void> {
   await safePostLinearActivity(config, state, sessionId, {
     content: {
@@ -756,7 +769,7 @@ async function postRepoSelection(
         value: repo.github,
       })),
     },
-  }, undefined);
+  }, jobId, linearWorkspaceId);
 }
 
 function repoFromSelectionReply(
@@ -820,8 +833,9 @@ async function maybeHandleApprovalReply(options: {
   queue: Pick<JobQueue, "enqueue">;
   sessionId: string;
   prompt: string;
+  linearWorkspaceId?: string;
 }): Promise<boolean> {
-  const { config, state, queue, sessionId, prompt } = options;
+  const { config, state, queue, sessionId, prompt, linearWorkspaceId } = options;
   const pending = state.getPendingApprovalForSession(sessionId);
   if (!pending) {
     return false;
@@ -832,7 +846,7 @@ async function maybeHandleApprovalReply(options: {
     await safePostLinearActivity(config, state, sessionId, {
       type: "elicitation",
       body: "Please reply `approve` to continue or `deny` to cancel this local Codex run.",
-    }, pending.jobId);
+    }, pending.jobId, linearWorkspaceId);
     return true;
   }
 
@@ -849,7 +863,7 @@ async function maybeHandleApprovalReply(options: {
     await safePostLinearActivity(config, state, sessionId, {
       type: "response",
       body: "Canceled the local Codex run.",
-    }, record.id);
+    }, record.id, record.linearWorkspaceId ?? linearWorkspaceId);
     return true;
   }
 
@@ -868,10 +882,11 @@ async function maybeHandleApprovalReply(options: {
   await safePostLinearActivity(config, state, sessionId, {
     type: "thought",
     body: "Approval received. Continuing the local Codex run.",
-  }, record.id);
+  }, record.id, record.linearWorkspaceId ?? linearWorkspaceId);
   queue.enqueue({
     id: record.id,
     sessionId: record.sessionId,
+    linearWorkspaceId: record.linearWorkspaceId ?? linearWorkspaceId,
     prompt: record.prompt ?? prompt,
     issue: {
       identifier: record.issueIdentifier,
@@ -894,9 +909,10 @@ async function safeUpdateLinearAgentSession(
   sessionId: string,
   input: Parameters<typeof updateLinearAgentSession>[2],
   jobId: string,
+  linearWorkspaceId?: string,
 ): Promise<void> {
   try {
-    await updateLinearAgentSession(config, sessionId, input, state);
+    await updateLinearAgentSession(config, sessionId, input, state, linearWorkspaceId);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to update Linear agent session";
     await state.addEvent("warn", message, jobId, "linear");
@@ -909,9 +925,10 @@ async function safePostLinearActivity(
   sessionId: string,
   content: Parameters<typeof postLinearActivity>[2],
   jobId?: string,
+  linearWorkspaceId?: string,
 ): Promise<void> {
   try {
-    await postLinearActivity(config, sessionId, content, state);
+    await postLinearActivity(config, sessionId, content, state, linearWorkspaceId);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to post Linear activity";
     await state.addEvent("warn", message, jobId, "linear");
@@ -922,9 +939,10 @@ async function safeSyncLinearIssueLifecycle(
   config: BridgeConfig,
   state: StateStore,
   issue: ReturnType<typeof getIssueContext>,
+  linearWorkspaceId?: string,
 ): Promise<void> {
   try {
-    const result = await syncLinearIssueForAgentSession(config, issue, state);
+    const result = await syncLinearIssueForAgentSession(config, issue, state, linearWorkspaceId);
     if (result.movedToState || result.delegateSet) {
       await state.addEvent(
         "info",
@@ -948,9 +966,10 @@ async function safeListLinearAgentSessionActivities(
   config: BridgeConfig,
   state: StateStore,
   sessionId: string,
+  linearWorkspaceId?: string,
 ): Promise<Awaited<ReturnType<typeof listLinearAgentSessionActivities>>> {
   try {
-    const activities = await listLinearAgentSessionActivities(config, sessionId, state);
+    const activities = await listLinearAgentSessionActivities(config, sessionId, state, 25, linearWorkspaceId);
     if (activities.length) {
       await state.addEvent("info", `Fetched ${activities.length} Linear Agent Session activities`, undefined, "linear");
     }

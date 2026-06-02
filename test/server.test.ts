@@ -511,6 +511,48 @@ describe("server webhook handling", () => {
     }
   });
 
+  test("removes scoped Linear installations on organization revocation webhooks", async () => {
+    const state = await loadedState();
+    const queue = new FakeQueue();
+    state.saveLinearInstallation({
+      workspaceId: "default",
+      appUserId: "default-app-user",
+      accessToken: "default_access",
+    });
+    state.saveLinearInstallation({
+      workspaceId: "org-1",
+      appUserId: "org-app-user",
+      accessToken: "org_access",
+    });
+    const handler = createRequestHandler({
+      config,
+      state,
+      queue,
+      webhookSecret: "secret",
+    });
+    const body = linearBody({
+      type: "OAuthApp",
+      action: "revoked",
+      organizationId: "org-1",
+    });
+
+    try {
+      const response = await handler(
+        new Request("http://127.0.0.1:8787/webhooks/linear", {
+          method: "POST",
+          headers: { "Linear-Signature": signature(body, "secret") },
+          body,
+        }),
+      );
+
+      expect(response.status).toBe(200);
+      expect(state.getLinearInstallation("org-1")).toBeUndefined();
+      expect(state.getLinearInstallation("default")?.appUserId).toBe("default-app-user");
+    } finally {
+      state.close();
+    }
+  });
+
   test("records Linear app-user notification webhooks without queueing work", async () => {
     const state = await loadedState();
     const queue = new FakeQueue();

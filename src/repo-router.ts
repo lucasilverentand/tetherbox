@@ -25,13 +25,14 @@ export async function routeRepoForSession(
   prompt: string,
   sessionId: string,
   tokenStore?: LinearTokenStore,
+  workspaceId?: string,
 ): Promise<RepoMapping> {
   const explicit = findExplicitRepo(config.repos, prompt);
   if (explicit) {
     return explicit;
   }
 
-  const suggested = await findSuggestedRepo(config, issue, sessionId, tokenStore);
+  const suggested = await findSuggestedRepo(config, issue, sessionId, tokenStore, workspaceId);
   if (suggested) {
     return suggested;
   }
@@ -49,11 +50,12 @@ async function findSuggestedRepo(
   issue: LinearIssueContext,
   sessionId: string,
   tokenStore?: LinearTokenStore,
+  workspaceId?: string,
 ): Promise<RepoMapping | undefined> {
   const minimumConfidence = config.linear.repositorySuggestionMinConfidence ?? 0.2;
 
   try {
-    const suggestions = await suggestLinearRepositories(config, issue.id, sessionId, tokenStore);
+    const suggestions = await suggestLinearRepositories(config, issue.id, sessionId, tokenStore, workspaceId);
     const best = suggestions
       .filter((suggestion) => suggestion.confidence >= minimumConfidence)
       .sort((left, right) => right.confidence - left.confidence)[0];

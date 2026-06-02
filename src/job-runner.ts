@@ -352,7 +352,7 @@ async function postActivity(
   content: LinearActivityContent | LinearActivityInput,
 ): Promise<void> {
   try {
-    await postLinearActivity(config, job.sessionId, content, state);
+    await postLinearActivity(config, job.sessionId, content, state, job.linearWorkspaceId);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to post Linear activity";
     await state.addEvent("warn", message, job.id, "linear");
@@ -370,7 +370,7 @@ async function updatePlan(
   plan: LinearPlanStep[],
 ): Promise<void> {
   try {
-    await updateLinearAgentSession(config, job.sessionId, { plan }, state);
+    await updateLinearAgentSession(config, job.sessionId, { plan }, state, job.linearWorkspaceId);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to update Linear agent session";
     await state.addEvent("warn", message, job.id, "linear");
@@ -393,7 +393,7 @@ async function updateExternalUrls(
   }
 
   try {
-    await updateLinearAgentSession(config, job.sessionId, { addedExternalUrls: urls }, state);
+    await updateLinearAgentSession(config, job.sessionId, { addedExternalUrls: urls }, state, job.linearWorkspaceId);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to update Linear external URLs";
     await state.addEvent("warn", message, job.id, "linear");
@@ -402,7 +402,7 @@ async function updateExternalUrls(
 
 async function updateIssueReviewState(config: BridgeConfig, state: StateStore, job: RoutedJob): Promise<void> {
   try {
-    const result = await moveLinearIssueToReviewState(config, job.issue, state);
+    const result = await moveLinearIssueToReviewState(config, job.issue, state, job.linearWorkspaceId);
     const issueId = result.issueId ?? job.issue.identifier ?? job.issue.id ?? "unknown";
     if (result.movedToState) {
       const message = `Moved Linear issue ${issueId} to ${result.movedToState}`;
