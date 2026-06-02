@@ -490,6 +490,93 @@ describe("server webhook handling", () => {
       delete process.env.LINEAR_API_KEY;
     }
   });
+
+  test("retries eligible jobs from the local operator API", async () => {
+    const state = await loadedState();
+    const queue = new FakeQueue(state);
+    const handler = createRequestHandler({ config, state, queue, webhookSecret: "secret" });
+    await state.createJob(jobFixture());
+    await state.updateJob("job-1", "failed", "Codex failed", {
+      retryEligible: true,
+      incrementRetryCount: true,
+      failureReason: "Codex failed",
+    });
+
+    try {
+      const response = await handler(new Request("http://127.0.0.1/api/jobs/job-1/retry", { method: "POST" }));
+      const body = await response.json();
+
+      expect(body).toEqual({ ok: true });
+      expect(queue.jobs).toHaveLength(1);
+      expect(queue.jobs[0]?.id).toBe("job-1");
+      expect(state.getJob("job-1")).toMatchObject({
+        status: "queued",
+        retryEligible: false,
+        lastMessage: "Retry queued from TUI",
+      });
+    } finally {
+      state.close();
+    }
+  });
+
+  test("approves and denies waiting jobs from the local operator API", async () => {
+    const state = await loadedState();
+    const queue = new FakeQueue(state);
+    const handler = createRequestHandler({ config, state, queue, webhookSecret: "secret" });
+    await state.createJob(jobFixture({ id: "job-approve", policy: { ruleName: "approval", decision: "require_approval", sandbox: "workspace-write" } }));
+    await state.updateJob("job-approve", "waiting_approval", "Approval required");
+    state.createApproval("job-approve", "Run local Codex");
+    await state.createJob(jobFixture({ id: "job-deny", sessionId: "sess_2", policy: { ruleName: "approval", decision: "require_approval", sandbox: "workspace-write" } }));
+    await state.updateJob("job-deny", "waiting_approval", "Approval required");
+    state.createApproval("job-deny", "Run local Codex");
+
+    try {
+      const approve = await handler(
+        new Request("http://127.0.0.1/api/jobs/job-approve/approve", { method: "POST" }),
+      );
+      const deny = await handler(new Request("http://127.0.0.1/api/jobs/job-deny/deny", { method: "POST" }));
+
+      expect(await approve.json()).toEqual({ ok: true });
+      expect(await deny.json()).toEqual({ ok: true });
+      expect(queue.jobs.find((job) => job.id === "job-approve")).toMatchObject({
+        policy: { decision: "allow_auto" },
+      });
+      expect(state.getJob("job-approve")?.status).toBe("queued");
+      expect(state.getJob("job-deny")?.status).toBe("canceled");
+    } finally {
+      state.close();
+    }
+  });
+
+  test("requires an operator token for non-loopback job actions", async () => {
+    const state = await loadedState();
+    const queue = new FakeQueue(state);
+    const handler = createRequestHandler({
+      config: { ...config, server: { ...config.server, operatorTokenEnv: "TETHERBOX_OPERATOR_TOKEN" } },
+      state,
+      queue,
+      webhookSecret: "secret",
+    });
+    await state.createJob(jobFixture());
+    await state.updateJob("job-1", "failed", "Codex failed", { retryEligible: true });
+    process.env.TETHERBOX_OPERATOR_TOKEN = "operator-secret";
+
+    try {
+      const rejected = await handler(new Request("https://bridge.example/api/jobs/job-1/retry", { method: "POST" }));
+      const accepted = await handler(
+        new Request("https://bridge.example/api/jobs/job-1/retry", {
+          method: "POST",
+          headers: { Authorization: "Bearer operator-secret" },
+        }),
+      );
+
+      expect(rejected.status).toBe(401);
+      expect(await accepted.json()).toEqual({ ok: true });
+    } finally {
+      delete process.env.TETHERBOX_OPERATOR_TOKEN;
+      state.close();
+    }
+  });
 });
 
 const config: BridgeConfig = {

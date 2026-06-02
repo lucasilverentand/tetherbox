@@ -194,6 +194,23 @@ Install docs:
 
 Template service definitions live in `examples/`, while the install scripts generate host-specific files from the current repo path and config path.
 
+## Operator TUI
+
+Open the terminal UI against the daemon:
+
+```bash
+bun run src/index.ts tui --url http://127.0.0.1:8787
+```
+
+The TUI has job, job detail, event, and event detail views. It shows daemon health and queue state from `/api/status`. Use `tab` to switch jobs/events, `enter` for detail, `esc` to go back, `j`/`k` to move, `c` to cancel active work, `r` to retry eligible failures, `a` to approve waiting jobs, `d` to deny waiting jobs, and `q` to quit.
+
+Job action endpoints are accepted on loopback URLs. If the operator TUI needs to control a non-loopback daemon URL, set `server.operatorTokenEnv` in config, export that token in the daemon environment, and pass it to the TUI:
+
+```bash
+export TETHERBOX_OPERATOR_TOKEN=...
+bun run src/index.ts tui --url https://your-public-host.example.com --operator-token "$TETHERBOX_OPERATOR_TOKEN"
+```
+
 ## Local Integration Harness
 
 Run the local integration harness with:

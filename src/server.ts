@@ -21,7 +21,7 @@ import { findExplicitRepo, routeRepoForSession } from "./repo-router";
 import { runJob } from "./job-runner";
 import { JobQueue } from "./job-queue";
 import { createJobId, StateStore } from "./state-store";
-import type { BridgeConfig, RepoMapping, RoutedJob } from "./types";
+import type { BridgeConfig, JobRecord, RepoMapping, RoutedJob } from "./types";
 
 export async function serve(configPath: string): Promise<void> {
   const config = await loadConfig(configPath);
@@ -106,8 +106,38 @@ export function createRequestHandler(options: RequestHandlerOptions): (request: 
 
     const cancelMatch = url.pathname.match(/^\/api\/jobs\/([^/]+)\/cancel$/);
     if (request.method === "POST" && cancelMatch) {
+      if (!isOperatorRequest(config, request, url)) {
+        return Response.json({ ok: false, reason: "operator_auth_required" }, { status: 401 });
+      }
       const canceled = await queue.cancel(decodeURIComponent(cancelMatch[1]!));
       return Response.json({ ok: canceled });
+    }
+
+    const retryMatch = url.pathname.match(/^\/api\/jobs\/([^/]+)\/retry$/);
+    if (request.method === "POST" && retryMatch) {
+      if (!isOperatorRequest(config, request, url)) {
+        return Response.json({ ok: false, reason: "operator_auth_required" }, { status: 401 });
+      }
+      const result = await retryJobFromApi(config, state, queue, decodeURIComponent(retryMatch[1]!));
+      return Response.json(result, { status: result.ok ? 200 : 409 });
+    }
+
+    const approveMatch = url.pathname.match(/^\/api\/jobs\/([^/]+)\/approve$/);
+    if (request.method === "POST" && approveMatch) {
+      if (!isOperatorRequest(config, request, url)) {
+        return Response.json({ ok: false, reason: "operator_auth_required" }, { status: 401 });
+      }
+      const result = await resolveApprovalFromApi(config, state, queue, decodeURIComponent(approveMatch[1]!), "approved");
+      return Response.json(result, { status: result.ok ? 200 : 409 });
+    }
+
+    const denyMatch = url.pathname.match(/^\/api\/jobs\/([^/]+)\/deny$/);
+    if (request.method === "POST" && denyMatch) {
+      if (!isOperatorRequest(config, request, url)) {
+        return Response.json({ ok: false, reason: "operator_auth_required" }, { status: 401 });
+      }
+      const result = await resolveApprovalFromApi(config, state, queue, decodeURIComponent(denyMatch[1]!), "denied");
+      return Response.json(result, { status: result.ok ? 200 : 409 });
     }
 
     if (request.method !== "POST" || url.pathname !== "/webhooks/linear") {
@@ -150,6 +180,109 @@ export function createRequestHandler(options: RequestHandlerOptions): (request: 
       const message = error instanceof Error ? error.message : "Unhandled webhook error";
       return Response.json({ error: message }, { status: 400 });
     }
+  };
+}
+
+function isOperatorRequest(config: BridgeConfig, request: Request, url: URL): boolean {
+  if (url.hostname === "127.0.0.1" || url.hostname === "localhost" || url.hostname === "::1") {
+    return true;
+  }
+
+  const tokenEnv = config.server.operatorTokenEnv;
+  const expected = tokenEnv ? process.env[tokenEnv] : undefined;
+  if (!expected) {
+    return false;
+  }
+
+  const authorization = request.headers.get("Authorization");
+  const headerToken = request.headers.get("X-Tetherbox-Operator-Token");
+  return authorization === `Bearer ${expected}` || headerToken === expected;
+}
+
+async function retryJobFromApi(
+  config: BridgeConfig,
+  state: StateStore,
+  queue: Pick<JobQueue, "enqueue">,
+  jobId: string,
+): Promise<{ ok: boolean; reason?: string }> {
+  const record = state.getJob(jobId);
+  if (!record) {
+    return { ok: false, reason: "job_not_found" };
+  }
+  if (!record.retryEligible) {
+    return { ok: false, reason: "job_not_retry_eligible" };
+  }
+
+  const routed = routedJobFromRecord(config, record, record.policyDecision);
+  if (!routed) {
+    return { ok: false, reason: "repo_not_configured" };
+  }
+
+  await state.updateJob(record.id, "queued", "Retry queued from TUI", { retryEligible: false });
+  await state.addEvent("info", "Retry queued from TUI", record.id, "tui");
+  queue.enqueue(routed);
+  return { ok: true };
+}
+
+async function resolveApprovalFromApi(
+  config: BridgeConfig,
+  state: StateStore,
+  queue: Pick<JobQueue, "enqueue">,
+  jobId: string,
+  status: "approved" | "denied",
+): Promise<{ ok: boolean; reason?: string }> {
+  const record = state.getJob(jobId);
+  const approval = state.getPendingApprovalForJob(jobId);
+  if (!record || !approval) {
+    return { ok: false, reason: "pending_approval_not_found" };
+  }
+
+  state.resolveApproval(approval.id, status, "TUI");
+  if (status === "denied") {
+    await state.updateJob(record.id, "canceled", "Denied from TUI", { retryEligible: false });
+    await state.addEvent("warn", "Approval denied from TUI", record.id, "tui");
+    return { ok: true };
+  }
+
+  const routed = routedJobFromRecord(config, record, "allow_auto");
+  if (!routed) {
+    await state.updateJob(record.id, "failed", `Could not approve job; repo ${record.repo} is not configured`, {
+      retryEligible: false,
+    });
+    return { ok: false, reason: "repo_not_configured" };
+  }
+
+  await state.updateJob(record.id, "queued", "Approved from TUI; queued for local Codex", { retryEligible: false });
+  await state.addEvent("info", "Approval granted from TUI", record.id, "tui");
+  queue.enqueue(routed);
+  return { ok: true };
+}
+
+function routedJobFromRecord(
+  config: BridgeConfig,
+  record: JobRecord,
+  decision: RoutedJob["policy"]["decision"],
+): RoutedJob | undefined {
+  const repo = config.repos.find((candidate) => candidate.github === record.repo);
+  if (!repo) {
+    return undefined;
+  }
+
+  return {
+    id: record.id,
+    sessionId: record.sessionId,
+    prompt: record.prompt ?? "",
+    issue: {
+      identifier: record.issueIdentifier,
+      title: record.issueTitle,
+      labels: [],
+    },
+    repo,
+    policy: {
+      ruleName: decision === "allow_auto" ? `${record.policyRule}:tui` : record.policyRule,
+      decision,
+      sandbox: config.codex.sandbox,
+    },
   };
 }
 

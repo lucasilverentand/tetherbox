@@ -7,6 +7,7 @@ export interface BridgeConfig {
     host: string;
     port: number;
     publicUrl?: string;
+    operatorTokenEnv?: string;
   };
   state?: {
     path: string;

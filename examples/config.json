@@ -2,7 +2,8 @@
   "server": {
     "host": "127.0.0.1",
     "port": 8787,
-    "publicUrl": "https://tetherbox.example.com"
+    "publicUrl": "https://tetherbox.example.com",
+    "operatorTokenEnv": "TETHERBOX_OPERATOR_TOKEN"
   },
   "state": {
     "path": "state/daemon.sqlite",

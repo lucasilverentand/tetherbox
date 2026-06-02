@@ -52,7 +52,7 @@ Open the terminal UI in another shell:
 bun run src/index.ts tui --url http://127.0.0.1:8787
 ```
 
-Press `q` to quit.
+The TUI shows daemon health, queue state, job lists, job details, event lists, and event details. Use `tab` to switch jobs/events, `enter` for detail, `esc` to go back, `j`/`k` to move, `c` to cancel active work, `r` to retry eligible failures, `a` to approve waiting jobs, `d` to deny waiting jobs, and `q` to quit. Job action endpoints are allowed on loopback URLs; set `server.operatorTokenEnv` and pass `--operator-token` when controlling a non-loopback daemon URL.
 
 `serve` remains as an alias for `daemon`.
 

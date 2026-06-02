@@ -18,7 +18,9 @@ async function main(): Promise<void> {
   const command = process.argv[2];
 
   if (command !== "serve" && command !== "daemon" && command !== "tui" && command !== "gc-worktrees") {
-    console.error("Usage: tetherbox <daemon|serve|tui|gc-worktrees> [--config <path>] [--url <url>]");
+    console.error(
+      "Usage: tetherbox <daemon|serve|tui|gc-worktrees> [--config <path>] [--url <url>] [--operator-token <token>]",
+    );
     process.exit(1);
   }
 
@@ -26,6 +28,7 @@ async function main(): Promise<void> {
     await runTui({
       url: getArg("--url") ?? "http://127.0.0.1:8787",
       intervalMs: Number(getArg("--interval-ms") ?? 2000),
+      operatorToken: getArg("--operator-token") ?? process.env.TETHERBOX_OPERATOR_TOKEN,
     });
     return;
   }
