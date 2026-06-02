@@ -627,6 +627,183 @@ describe("server webhook handling", () => {
     }
   });
 
+  test("deduplicates retried Linear Agent Session webhooks by delivery header", async () => {
+    const state = await loadedState();
+    const queue = new FakeQueue();
+    const handler = createRequestHandler({
+      config,
+      state,
+      queue,
+      webhookSecret: "secret",
+    });
+    const body = linearBody({
+      action: "created",
+      agentSession: {
+        id: "sess_duplicate",
+        promptContext: "Fix this",
+        issue: {
+          id: "issue-duplicate",
+          identifier: "OSS-260",
+          title: "Deduplicate webhooks",
+          teamKey: "WEB",
+          labels: [],
+        },
+      },
+    });
+
+    try {
+      const first = await handler(
+        new Request("http://127.0.0.1:8787/webhooks/linear", {
+          method: "POST",
+          headers: {
+            "Linear-Signature": signature(body, "secret"),
+            "Linear-Delivery": "delivery-agent-1",
+          },
+          body,
+        }),
+      );
+      await waitFor(() => queue.jobs.length === 1);
+
+      const second = await handler(
+        new Request("http://127.0.0.1:8787/webhooks/linear", {
+          method: "POST",
+          headers: {
+            "Linear-Signature": signature(body, "secret"),
+            "Linear-Delivery": "delivery-agent-1",
+          },
+          body,
+        }),
+      );
+
+      expect(first.status).toBe(200);
+      expect(second.status).toBe(200);
+      expect(await second.json()).toMatchObject({
+        accepted: false,
+        reason: "duplicate_webhook",
+        deliveryId: "delivery-agent-1",
+      });
+      expect(queue.jobs).toHaveLength(1);
+      expect(state.snapshot().jobs).toHaveLength(1);
+      expect(state.snapshot().events).toContainEqual(expect.objectContaining({
+        level: "info",
+        source: "linear",
+        message: "Ignored duplicate Linear webhook delivery delivery-agent-1",
+      }));
+    } finally {
+      state.close();
+    }
+  });
+
+  test("deduplicates retried Linear management webhooks by payload webhookId", async () => {
+    const state = await loadedState();
+    const queue = new FakeQueue();
+    const handler = createRequestHandler({
+      config,
+      state,
+      queue,
+      webhookSecret: "secret",
+    });
+    const body = linearBody({
+      type: "PermissionChange",
+      action: "teamAccessChanged",
+      webhookId: "delivery-management-1",
+      appUserId: "app-user-1",
+      canAccessAllPublicTeams: false,
+      addedTeamIds: ["team-1"],
+      removedTeamIds: [],
+    });
+
+    try {
+      const first = await handler(
+        new Request("http://127.0.0.1:8787/webhooks/linear", {
+          method: "POST",
+          headers: { "Linear-Signature": signature(body, "secret") },
+          body,
+        }),
+      );
+      const second = await handler(
+        new Request("http://127.0.0.1:8787/webhooks/linear", {
+          method: "POST",
+          headers: { "Linear-Signature": signature(body, "secret") },
+          body,
+        }),
+      );
+      const events = state.snapshot().events;
+
+      expect(first.status).toBe(200);
+      expect(second.status).toBe(200);
+      expect(await second.json()).toMatchObject({ accepted: false, reason: "duplicate_webhook" });
+      expect(events.filter((event) => event.message.includes("Linear app team access changed"))).toHaveLength(1);
+      expect(events.filter((event) => event.message.includes("Ignored duplicate Linear webhook delivery"))).toHaveLength(1);
+      expect(queue.jobs).toHaveLength(0);
+    } finally {
+      state.close();
+    }
+  });
+
+  test("deduplicates retried Linear inbox notification webhooks before repeating side effects", async () => {
+    const state = await loadedState();
+    const queue = new FakeQueue(state);
+    await state.createJob(jobFixture({
+      id: "job-running",
+      sessionId: "sess_running",
+      issue: { id: "issue-1", identifier: "OSS-260", title: "Deduplicate webhooks", labels: [] },
+    }));
+    queue.jobs.push(jobFixture({
+      id: "job-running",
+      sessionId: "sess_running",
+      issue: { id: "issue-1", identifier: "OSS-260", title: "Deduplicate webhooks", labels: [] },
+    }));
+    const handler = createRequestHandler({
+      config,
+      state,
+      queue,
+      webhookSecret: "secret",
+    });
+    const body = linearBody({
+      type: "AppUserNotification",
+      action: "issueUnassignedFromYou",
+      webhookId: "delivery-inbox-1",
+      appUserId: "app-user-1",
+      notification: {
+        issue: {
+          id: "issue-1",
+          identifier: "OSS-260",
+          title: "Deduplicate webhooks",
+        },
+      },
+    });
+
+    try {
+      const first = await handler(
+        new Request("http://127.0.0.1:8787/webhooks/linear", {
+          method: "POST",
+          headers: { "Linear-Signature": signature(body, "secret") },
+          body,
+        }),
+      );
+      const second = await handler(
+        new Request("http://127.0.0.1:8787/webhooks/linear", {
+          method: "POST",
+          headers: { "Linear-Signature": signature(body, "secret") },
+          body,
+        }),
+      );
+      const secondPayload = await second.json() as { accepted: boolean; reason: string };
+      const events = state.snapshot().events;
+
+      expect(first.status).toBe(200);
+      expect(second.status).toBe(200);
+      expect(secondPayload).toMatchObject({ accepted: false, reason: "duplicate_webhook" });
+      expect(queue.jobs).toHaveLength(0);
+      expect(state.getJob("job-running")?.status).toBe("canceled");
+      expect(events.filter((event) => event.message.includes("issueUnassignedFromYou"))).toHaveLength(1);
+      expect(events.filter((event) => event.message.includes("Ignored duplicate Linear webhook delivery"))).toHaveLength(1);
+    } finally {
+      state.close();
+    }
+  });
+
   test("cancels a queued job from a Linear stop signal", async () => {
     process.env.LINEAR_API_KEY = "lin_test";
     const fetchMock = mockDeferredFetch();

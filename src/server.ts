@@ -164,6 +164,16 @@ export function createRequestHandler(options: RequestHandlerOptions): (request: 
         await state.addEvent("warn", timestampError.message, undefined, "linear");
         return Response.json({ error: timestampError.message, reason: timestampError.reason }, { status: 401 });
       }
+      const deliveryId = linearWebhookDeliveryId(event, request.headers.get("Linear-Delivery"));
+      if (deliveryId && !state.claimWebhookDelivery(deliveryId)) {
+        await state.addEvent("info", `Ignored duplicate Linear webhook delivery ${deliveryId}`, undefined, "linear");
+        return Response.json({
+          ok: true,
+          accepted: false,
+          reason: "duplicate_webhook",
+          deliveryId,
+        });
+      }
       const managementWebhook = getLinearManagementWebhook(event);
       if (managementWebhook) {
         await handleLinearManagementWebhook(state, managementWebhook);
@@ -242,6 +252,19 @@ function linearWebhookTimestampError(
       reason: "stale_webhook",
       message: "Linear webhook timestamp is outside the accepted freshness window",
     };
+  }
+  return undefined;
+}
+
+function linearWebhookDeliveryId(event: { webhookId?: unknown }, headerDeliveryId: string | null): string | undefined {
+  return firstNonEmptyString(event.webhookId, headerDeliveryId);
+}
+
+function firstNonEmptyString(...values: unknown[]): string | undefined {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) {
+      return value;
+    }
   }
   return undefined;
 }
