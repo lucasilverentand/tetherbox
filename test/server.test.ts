@@ -421,6 +421,137 @@ describe("server webhook handling", () => {
     }
   });
 
+  test("attaches Linear mention notification context to matching active jobs", async () => {
+    const state = await loadedState();
+    const queue = new FakeQueue(state);
+    const queuedJob = jobFixture({
+      id: "job-queued",
+      sessionId: "sess_queued",
+      issue: { id: "issue-1", identifier: "OSS-267", title: "Attach notification context", labels: [] },
+    });
+    await state.createJob(queuedJob);
+    queue.jobs.push(queuedJob);
+    await state.createJob(jobFixture({
+      id: "job-running",
+      sessionId: "sess_running",
+      issue: { id: "issue-1", identifier: "OSS-267", title: "Attach notification context", labels: [] },
+    }));
+    await state.updateJob("job-running", "running", "Job started");
+    const handler = createRequestHandler({
+      config,
+      state,
+      queue,
+      webhookSecret: "secret",
+    });
+    const body = linearBody({
+      type: "AppUserNotification",
+      action: "issueCommentMention",
+      appUserId: "app-user-1",
+      notification: {
+        issue: {
+          id: "issue-1",
+          identifier: "OSS-267",
+          title: "Attach notification context",
+        },
+        comment: {
+          id: "comment-1",
+          body: "Please include the latest reproduction notes.",
+          url: "https://linear.app/seventwo/comment/comment-1",
+          user: { name: "Luca" },
+        },
+      },
+    });
+
+    try {
+      const response = await handler(
+        new Request("http://127.0.0.1:8787/webhooks/linear", {
+          method: "POST",
+          headers: { "Linear-Signature": signature(body, "secret") },
+          body,
+        }),
+      );
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        ok: true,
+        accepted: true,
+        eventType: "AppUserNotification",
+        action: "issueCommentMention",
+        canceledJobIds: [],
+      });
+      expect(queue.jobs).toHaveLength(1);
+      expect(state.getJob("job-queued")?.status).toBe("queued");
+      expect(state.getJob("job-running")?.status).toBe("running");
+      const notificationEvents = state.snapshot().events.filter((event) => event.message.includes("issueCommentMention"));
+      expect(notificationEvents).toHaveLength(3);
+      expect(notificationEvents.some((event) => event.jobId === undefined)).toBe(true);
+      expect(notificationEvents.some((event) => event.jobId === "job-queued")).toBe(true);
+      expect(notificationEvents.some((event) => event.jobId === "job-running")).toBe(true);
+      expect(notificationEvents.every((event) => event.message.includes("Please include the latest reproduction notes"))).toBe(true);
+      expect(notificationEvents.every((event) => event.message.includes("Luca"))).toBe(true);
+    } finally {
+      state.close();
+    }
+  });
+
+  test("keeps Linear mention notifications with no matching active job audit-only", async () => {
+    const state = await loadedState();
+    const queue = new FakeQueue(state);
+    await state.createJob(jobFixture({
+      id: "job-completed",
+      sessionId: "sess_completed",
+      issue: { id: "issue-1", identifier: "OSS-267", title: "Attach notification context", labels: [] },
+    }));
+    await state.updateJob("job-completed", "completed", "Job completed");
+    const handler = createRequestHandler({
+      config,
+      state,
+      queue,
+      webhookSecret: "secret",
+    });
+    const body = linearBody({
+      type: "AppUserNotification",
+      action: "issueNewComment",
+      appUserId: "app-user-1",
+      notification: {
+        issue: {
+          id: "issue-1",
+          identifier: "OSS-267",
+          title: "Attach notification context",
+        },
+        comment: {
+          id: "comment-1",
+          body: "This should only be a global audit event.",
+          user: { name: "Luca" },
+        },
+      },
+    });
+
+    try {
+      const response = await handler(
+        new Request("http://127.0.0.1:8787/webhooks/linear", {
+          method: "POST",
+          headers: { "Linear-Signature": signature(body, "secret") },
+          body,
+        }),
+      );
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ canceledJobIds: [] });
+      expect(queue.jobs).toHaveLength(0);
+      expect(state.getJob("job-completed")?.status).toBe("completed");
+      const notificationEvents = state.snapshot().events.filter((event) => event.message.includes("issueNewComment"));
+      expect(notificationEvents).toHaveLength(1);
+      expect(notificationEvents[0]).toMatchObject({
+        jobId: undefined,
+        source: "linear",
+        message: expect.stringContaining("This should only be a global audit event"),
+      });
+    } finally {
+      state.close();
+    }
+  });
+
   test("cancels matching active jobs from Linear app-user unassignment notifications", async () => {
     const state = await loadedState();
     const queue = new FakeQueue(state);

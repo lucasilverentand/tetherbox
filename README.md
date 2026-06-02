@@ -109,7 +109,7 @@ https://your-public-host.example.com/oauth/linear/start
 Tetherbox redirects to Linear with `actor=app`, validates the callback state, exchanges the authorization code, stores the app actor token in SQLite, and refreshes stored tokens before GraphQL calls when needed.
 When an installed app actor starts work on an issue, Tetherbox follows Linear agent best practices by moving the issue into the team's first started workflow state when needed and setting the stored app user as the issue delegate when no delegate is already set.
 Permission-change webhooks are recorded as daemon audit events. OAuth app revocation webhooks remove the stored installation token so the app must be reinstalled before Tetherbox can post Linear activity or update delegated issues again.
-Inbox Notification webhooks are recorded as daemon audit events. If Linear notifies Tetherbox that the app user was unassigned from an issue or that the issue moved to a completed or canceled workflow status, matching active local jobs are canceled.
+Inbox Notification webhooks are recorded as daemon audit events. Direct mention/comment notifications are also copied into matching active job timelines so operators can see fresh Linear context in the TUI. If Linear notifies Tetherbox that the app user was unassigned from an issue or that the issue moved to a completed or canceled workflow status, matching active local jobs are canceled.
 
 ## Policy Config
 
