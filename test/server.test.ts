@@ -1487,6 +1487,13 @@ describe("server webhook handling", () => {
       expect(await response.json()).toMatchObject({ ok: true, stop: true });
       await waitFor(() => state.getJob("tetherbox-sess_stop")?.status === "canceled");
       await waitFor(() => fetchMock.pending.length === 1);
+      expect(linearActivityInputs(fetchMock.calls)[0]).toMatchObject({
+        agentSessionId: "sess_stop",
+        content: {
+          type: "error",
+          body: "Stopped the local Codex run.",
+        },
+      });
       fetchMock.resolveNext({ data: { agentActivityCreate: { success: true } } });
       expect(queue.jobs).toHaveLength(0);
     } finally {
@@ -1528,8 +1535,56 @@ describe("server webhook handling", () => {
       expect(response.status).toBe(200);
       await waitFor(() => state.getJob("tetherbox-sess_wait")?.status === "canceled");
       await waitFor(() => fetchMock.pending.length === 1);
+      expect(linearActivityInputs(fetchMock.calls)[0]).toMatchObject({
+        agentSessionId: "sess_wait",
+        content: {
+          type: "error",
+          body: "Stopped the local Codex run.",
+        },
+      });
       fetchMock.resolveNext({ data: { agentActivityCreate: { success: true } } });
       expect(state.getPendingApprovalForSession("sess_wait")).toBeUndefined();
+    } finally {
+      fetchMock.restore();
+      state.close();
+      delete process.env.LINEAR_API_KEY;
+    }
+  });
+
+  test("cancels a queued stop-signal job without Linear API access", async () => {
+    delete process.env.LINEAR_API_KEY;
+    const fetchMock = mockDeferredFetch();
+    const state = await loadedState();
+    const queue = new FakeQueue(state);
+    await state.createJob(jobFixture({ id: "tetherbox-sess_stop", sessionId: "sess_stop" }));
+    queue.jobs.push(jobFixture({ id: "tetherbox-sess_stop", sessionId: "sess_stop" }));
+    const handler = createRequestHandler({
+      config,
+      state,
+      queue,
+      webhookSecret: "secret",
+    });
+    const body = linearBody({
+      action: "prompted",
+      agentSession: { id: "sess_stop" },
+      agentActivity: { body: "stop", signal: "stop" },
+    });
+
+    try {
+      const response = await handler(
+        new Request("http://127.0.0.1:8787/webhooks/linear", {
+          method: "POST",
+          headers: { "Linear-Signature": signature(body, "secret") },
+          body,
+        }),
+      );
+
+      expect(response.status).toBe(200);
+      await waitFor(() => state.getJob("tetherbox-sess_stop")?.status === "canceled");
+      await sleep(10);
+      expect(fetchMock.pending).toHaveLength(0);
+      expect(linearActivityInputs(fetchMock.calls)).toHaveLength(0);
+      expect(queue.jobs).toHaveLength(0);
     } finally {
       fetchMock.restore();
       state.close();
@@ -1565,8 +1620,9 @@ describe("server webhook handling", () => {
 
       expect(response.status).toBe(200);
       await waitFor(() => state.snapshot().events.length === 1);
-      await waitFor(() => fetchMock.pending.length === 1);
-      fetchMock.resolveNext({ data: { agentActivityCreate: { success: true } } });
+      await sleep(10);
+      expect(fetchMock.pending).toHaveLength(0);
+      expect(linearActivityInputs(fetchMock.calls)).toHaveLength(0);
       expect(state.snapshot().jobs).toHaveLength(0);
       expect(queue.jobs).toHaveLength(0);
       expect(state.snapshot().events[0]?.message).toContain("no active job");

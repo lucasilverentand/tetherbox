@@ -663,10 +663,6 @@ async function handleLinearStopSignal(options: {
       undefined,
       "linear",
     );
-    await safePostLinearActivity(config, state, sessionId, {
-      type: "response",
-      body: "No active local Codex job was running.",
-    });
     return;
   }
 
@@ -680,7 +676,7 @@ async function handleLinearStopSignal(options: {
     await state.updateJob(activeJob.id, "canceled", "Canceled by Linear stop signal");
   }
   await safePostLinearActivity(config, state, sessionId, {
-    type: "response",
+    type: "error",
     body: "Stopped the local Codex run.",
   }, activeJob.id);
 }
