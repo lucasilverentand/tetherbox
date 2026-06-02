@@ -58,6 +58,16 @@ export class ValidationFailedError extends Error {
   }
 }
 
+export class GitHubAuthenticationRequiredError extends Error {
+  constructor(
+    message: string,
+    readonly result: CommandResult,
+  ) {
+    super(message);
+    this.name = "GitHubAuthenticationRequiredError";
+  }
+}
+
 export async function finalizeSuccessfulRun(
   config: BridgeConfig,
   job: RoutedJob,
@@ -74,11 +84,11 @@ export async function finalizeSuccessfulRun(
 
   await runner.run("git", ["add", "--all"], worktree.path);
   await createCommit(config, job, worktree, runner, warnings);
-  await runner.run("git", ["push", "-u", "origin", worktree.branchName], worktree.path);
+  await runGitPush(runner, worktree.branchName, worktree.path);
   const existing = await findExistingPullRequest(job.repo.github, worktree, runner);
   if (existing) {
-    await runner.run(
-      "gh",
+    await runGitHubCommand(
+      runner,
       [
         "pr",
         "edit",
@@ -101,8 +111,8 @@ export async function finalizeSuccessfulRun(
     };
   }
 
-  const created = await runner.run(
-    "gh",
+  const created = await runGitHubCommand(
+    runner,
     [
       "pr",
       "create",
@@ -128,6 +138,48 @@ export async function finalizeSuccessfulRun(
     warnings,
     validation,
   };
+}
+
+async function runGitPush(
+  runner: CommandRunner,
+  branchName: string,
+  cwd: string,
+): Promise<CommandResult> {
+  try {
+    return await runner.run("git", ["push", "-u", "origin", branchName], cwd);
+  } catch (error) {
+    const result = commandResultFromError(error);
+    if (isGitHubAuthenticationFailure(result) || isGitRemoteAuthenticationFailure(result)) {
+      throw new GitHubAuthenticationRequiredError("GitHub authentication is required to push the job branch", result);
+    }
+    throw error;
+  }
+}
+
+async function runGitHubCommand(
+  runner: CommandRunner,
+  args: string[],
+  cwd: string,
+): Promise<CommandResult> {
+  try {
+    return await runner.run("gh", args, cwd);
+  } catch (error) {
+    const result = commandResultFromError(error);
+    if (isGitHubAuthenticationFailure(result)) {
+      throw new GitHubAuthenticationRequiredError("GitHub CLI authentication is required", result);
+    }
+    throw error;
+  }
+}
+
+export function isGitHubAuthenticationFailure(result: CommandResult): boolean {
+  const output = [result.stdout, result.stderr].join("\n");
+  return /(gh auth login|not logged in|not authenticated|authentication required|requires authentication|HTTP 401|Bad credentials)/i.test(output);
+}
+
+function isGitRemoteAuthenticationFailure(result: CommandResult): boolean {
+  const output = [result.stdout, result.stderr].join("\n");
+  return /(Permission denied \(publickey\)|Authentication failed|could not read Username|repository access denied|HTTP 401|HTTP 403)/i.test(output);
 }
 
 export async function watchPullRequestChecks(
@@ -242,8 +294,8 @@ async function findExistingPullRequest(
   runner: CommandRunner,
 ): Promise<ExistingPullRequest | undefined> {
   try {
-    const result = await runner.run(
-      "gh",
+    const result = await runGitHubCommand(
+      runner,
       ["pr", "view", worktree.branchName, "--repo", repo, "--json", "url,number"],
       worktree.path,
     );

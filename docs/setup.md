@@ -110,6 +110,8 @@ Check GitHub CLI auth before enabling PR creation:
 gh auth status
 ```
 
+If GitHub CLI auth is missing when Tetherbox tries to publish a pull request, the job pauses and posts a Linear `auth` elicitation. Run `gh auth login` as the daemon user, then reply `approve` or `continue` in Linear to retry. Set `git.githubAuthUrl` to control the URL shown in Linear's auth prompt; it defaults to GitHub's device login page.
+
 ## Repository Mappings
 
 Each `repos` entry maps Linear work to a local checkout:
@@ -173,7 +175,8 @@ Tetherbox creates commits from the isolated job worktree after configured valida
 ```json
 {
   "git": {
-    "signingKeyPath": "~/.ssh/codex_signing_key"
+    "signingKeyPath": "~/.ssh/codex_signing_key",
+    "githubAuthUrl": "https://github.com/login/device"
   }
 }
 ```

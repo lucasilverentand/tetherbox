@@ -62,6 +62,7 @@ Policy decisions define how much automation is allowed:
 Approval-required jobs persist a pending approval in SQLite. Replies such as `approve` continue the job; `deny`, `cancel`, or a Linear stop signal cancel it. Pending approvals expire after `queue.approvalTimeoutMs`.
 
 Approving a job changes the local policy decision for that resumed job to an approved auto run. Use `require_approval` for work that can be allowed after explicit human confirmation, and `deny` for work that should never run through this daemon.
+GitHub authentication failures during pull request publishing also pause the job and emit a Linear `auth` elicitation. Configure `git.githubAuthUrl` only to a trusted GitHub or internal setup page, because users may click it from Linear before retrying the job.
 
 ## Webhook Handling
 

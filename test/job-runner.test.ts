@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 import { runJob } from "../src/job-runner";
-import { ValidationFailedError } from "../src/pr-automation";
+import { GitHubAuthenticationRequiredError, ValidationFailedError } from "../src/pr-automation";
 import { StateStore } from "../src/state-store";
 import type { BridgeConfig, CodexNotification, RoutedJob, SandboxMode } from "../src/types";
 
@@ -105,6 +105,78 @@ describe("runJob", () => {
       message: "Validation failed: bun test\nexpected true to be false",
       jobId: "job-2",
     });
+  });
+
+  test("pauses with a Linear auth signal when GitHub authentication is required", async () => {
+    process.env.LINEAR_API_KEY = "lin_test";
+    const calls: unknown[] = [];
+    const restore = mockFetch(calls);
+    const state = new StateStore(await statePath());
+    await state.load();
+    await state.createJob(autoJob);
+    const client = new FakeCodexClient();
+
+    try {
+      const result = await runJob(
+        {
+          ...config,
+          linear: { ...config.linear, apiKeyEnv: "LINEAR_API_KEY" },
+          git: { githubAuthUrl: "https://github.com/login/device" },
+        },
+        autoJob,
+        state,
+        {
+          createClient: () => client,
+          prepareWorktree: async () => worktree,
+          finalizeRun: async () => {
+            throw new GitHubAuthenticationRequiredError("GitHub CLI authentication is required", {
+              stdout: "",
+              stderr: "gh auth login",
+            });
+          },
+        },
+      );
+
+      expect(result).toEqual({
+        status: "waiting_approval",
+        message: "Waiting for GitHub authentication",
+      });
+      expect(state.getPendingApprovalForJob("job-2")).toMatchObject({
+        requestedAction: "Authenticate GitHub CLI and resume Tetherbox",
+        status: "pending",
+      });
+      expect(state.snapshot().events).toContainEqual(
+        expect.objectContaining({
+          source: "github",
+          level: "warn",
+          jobId: "job-2",
+          message: "GitHub CLI authentication is required before publishing a pull request",
+        }),
+      );
+      expect(calls).toContainEqual(
+        expect.objectContaining({
+          body: expect.objectContaining({
+            variables: expect.objectContaining({
+              input: expect.objectContaining({
+                signal: "auth",
+                signalMetadata: {
+                  url: "https://github.com/login/device",
+                  providerName: "GitHub",
+                },
+                content: expect.objectContaining({
+                  type: "elicitation",
+                  body: expect.stringContaining("gh auth login"),
+                }),
+              }),
+            }),
+          }),
+        }),
+      );
+    } finally {
+      restore();
+      state.close();
+      delete process.env.LINEAR_API_KEY;
+    }
   });
 
   test("adds pull request URLs to the Linear agent session", async () => {

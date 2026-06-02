@@ -29,6 +29,8 @@ Early scaffold. The current app includes:
 - Git installed.
 - GitHub CLI installed and authenticated when PR creation is enabled.
 
+If GitHub CLI auth is missing during PR publishing, Tetherbox posts a Linear `auth` elicitation with a GitHub link and waits. Authenticate as the daemon user with `gh auth login`, then reply `approve` or `continue` in Linear to retry the job.
+
 ## Quick Start
 
 Copy the example config:
