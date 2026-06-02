@@ -21,6 +21,7 @@ import {
   syncLinearIssueForAgentSession,
   updateLinearAgentSession,
   verifyLinearSignature,
+  type LinearInboxNotificationWebhook,
 } from "./linear";
 import { applyPolicy } from "./policy";
 import { findExplicitRepo, routeRepoForSession } from "./repo-router";
@@ -288,31 +289,72 @@ async function handleLinearInboxNotificationWebhook(
   event: NonNullable<ReturnType<typeof getLinearInboxNotificationWebhook>>,
 ): Promise<string[]> {
   await state.addEvent("info", formatLinearInboxNotificationWebhookEvent(event), undefined, "linear");
-  if (event.action !== "issueUnassignedFromYou" || !event.issue) {
+  if (!event.issue) {
     return [];
   }
 
-  const activeJobs = state.listActiveJobsForIssue(event.issue);
+  if (event.action === "issueUnassignedFromYou") {
+    return cancelActiveJobsForLinearIssue(state, queue, event.issue, {
+      approvalResolution: "Linear unassignment",
+      jobMessage: "Canceled because the Linear app user was unassigned from the issue",
+      failureReason: "Linear app user unassigned from issue",
+      eventMessage: "Canceled job because the Linear app user was unassigned from the issue",
+      noMatchMessage: "Linear app user was unassigned from an issue, but no matching active job was found",
+    });
+  }
+
+  if (event.action === "issueStatusChanged") {
+    const terminalStatus = terminalLinearIssueStatusType(event.issue.statusType);
+    if (terminalStatus) {
+      return cancelActiveJobsForLinearIssue(state, queue, event.issue, {
+        approvalResolution: "Linear issue status changed",
+        jobMessage: `Canceled because the Linear issue moved to ${terminalStatus}`,
+        failureReason: `Linear issue status changed to ${terminalStatus}`,
+        eventMessage: `Canceled job because the Linear issue moved to ${terminalStatus}`,
+        noMatchMessage: `Linear issue moved to ${terminalStatus}, but no matching active job was found`,
+      });
+    }
+  }
+
+  return [];
+}
+
+function terminalLinearIssueStatusType(statusType: string | undefined): "completed" | "canceled" | undefined {
+  const normalized = statusType?.trim().toLowerCase();
+  return normalized === "completed" || normalized === "canceled" ? normalized : undefined;
+}
+
+async function cancelActiveJobsForLinearIssue(
+  state: StateStore,
+  queue: Pick<JobQueue, "cancel">,
+  issue: NonNullable<LinearInboxNotificationWebhook["issue"]>,
+  messages: {
+    approvalResolution: string;
+    jobMessage: string;
+    failureReason: string;
+    eventMessage: string;
+    noMatchMessage: string;
+  },
+): Promise<string[]> {
+  const activeJobs = state.listActiveJobsForIssue(issue);
   const canceledJobIds: string[] = [];
   for (const job of activeJobs) {
     const pendingApproval = state.getPendingApprovalForJob(job.id);
     if (pendingApproval) {
-      state.resolveApproval(pendingApproval.id, "denied", "Linear unassignment");
+      state.resolveApproval(pendingApproval.id, "denied", messages.approvalResolution);
     }
 
-    const canceledByQueue = await queue.cancel(job.id);
-    if (!canceledByQueue || job.status === "waiting_approval") {
-      await state.updateJob(job.id, "canceled", "Canceled because the Linear app user was unassigned from the issue", {
-        retryEligible: false,
-        failureReason: "Linear app user unassigned from issue",
-      });
-    }
-    await state.addEvent("warn", "Canceled job because the Linear app user was unassigned from the issue", job.id, "linear");
+    await queue.cancel(job.id);
+    await state.updateJob(job.id, "canceled", messages.jobMessage, {
+      retryEligible: false,
+      failureReason: messages.failureReason,
+    });
+    await state.addEvent("warn", messages.eventMessage, job.id, "linear");
     canceledJobIds.push(job.id);
   }
 
   if (!canceledJobIds.length) {
-    await state.addEvent("warn", "Linear app user was unassigned from an issue, but no matching active job was found", undefined, "linear");
+    await state.addEvent("warn", messages.noMatchMessage, undefined, "linear");
   }
   return canceledJobIds;
 }

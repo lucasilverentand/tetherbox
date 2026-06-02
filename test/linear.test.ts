@@ -118,6 +118,10 @@ describe("Linear webhook handling", () => {
               identifier: "OSS-256",
               title: "Handle inbox notification webhooks",
               url: "https://linear.app/seventwo/issue/OSS-256",
+              state: {
+                name: "Done",
+                type: "completed",
+              },
             },
           },
         }),
@@ -133,10 +137,13 @@ describe("Linear webhook handling", () => {
         identifier: "OSS-256",
         title: "Handle inbox notification webhooks",
         url: "https://linear.app/seventwo/issue/OSS-256",
+        statusName: "Done",
+        statusType: "completed",
       },
     });
     expect(formatLinearInboxNotificationWebhookEvent(notification!)).toContain("issueUnassignedFromYou");
     expect(formatLinearInboxNotificationWebhookEvent(notification!)).toContain("OSS-256");
+    expect(formatLinearInboxNotificationWebhookEvent(notification!)).toContain("status: Done");
   });
 
   test("rejects malformed Linear webhook payloads", () => {

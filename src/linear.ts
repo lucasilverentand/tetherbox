@@ -78,6 +78,8 @@ export interface LinearInboxNotificationWebhook {
     identifier?: string;
     title?: string;
     url?: string;
+    statusType?: string;
+    statusName?: string;
   };
 }
 
@@ -217,6 +219,7 @@ export function formatLinearInboxNotificationWebhookEvent(event: LinearInboxNoti
     event.issue?.title,
     event.issue?.url,
     event.issue?.id && !event.issue.identifier ? event.issue.id : undefined,
+    event.issue?.statusName ? `status: ${event.issue.statusName}` : undefined,
   ].filter(Boolean);
   return [
     `Linear app-user notification: ${event.action}`,
@@ -848,11 +851,14 @@ function extractNotificationIssue(value: unknown): LinearInboxNotificationWebhoo
   }
 
   const issue = recordValue(notification.issue) ?? recordValue(notification.issueSnapshot);
+  const state = recordValue(issue?.state) ?? recordValue(issue?.status) ?? recordValue(notification.state) ?? recordValue(notification.status);
   const result = {
     ...definedText("id", stringField(issue ?? notification, "id") ?? stringField(notification, "issueId")),
     ...definedText("identifier", stringField(issue ?? notification, "identifier") ?? stringField(notification, "issueIdentifier")),
     ...definedText("title", stringField(issue ?? notification, "title") ?? stringField(notification, "issueTitle")),
     ...definedText("url", stringField(issue ?? notification, "url") ?? stringField(notification, "issueUrl")),
+    ...definedText("statusType", stringField(state ?? issue ?? notification, "type") ?? stringField(issue ?? notification, "statusType")),
+    ...definedText("statusName", stringField(state ?? issue ?? notification, "name") ?? stringField(issue ?? notification, "statusName")),
   };
 
   return Object.keys(result).length ? result : undefined;
