@@ -1,6 +1,7 @@
 import { CodexAppServerClient } from "./codex-app-server";
 import { JobCanceledError, type JobQueueResult } from "./job-queue";
 import { postLinearActivity, updateLinearAgentSession, type LinearActivityContent, type LinearPlanStep } from "./linear";
+import { finalizeSuccessfulRun } from "./pr-automation";
 import type { StateStore } from "./state-store";
 import type { BridgeConfig, RoutedJob } from "./types";
 import { prepareWorktree } from "./worktree-manager";
@@ -97,6 +98,28 @@ export async function runJob(
     });
     if (!existingThreadId) {
       await state.setSessionThreadId(job.sessionId, threadId, job.id);
+    }
+    const pullRequest = await finalizeSuccessfulRun(config, job, worktree);
+    if (pullRequest.status === "created") {
+      state.savePullRequest({
+        jobId: job.id,
+        githubRepo: job.repo.github,
+        branchName: worktree.branchName,
+        prNumber: pullRequest.number,
+        url: pullRequest.url,
+        status: "open",
+      });
+      await postActivity(config, state, job, {
+        type: "action",
+        action: "Created pull request",
+        parameter: job.repo.github,
+        result: pullRequest.url,
+      });
+    } else {
+      await postActivity(config, state, job, {
+        type: "thought",
+        body: "Codex completed without file changes, so no pull request was opened.",
+      });
     }
     throwIfCanceled(options.signal);
     await updatePlan(config, state, job, [

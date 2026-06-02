@@ -378,6 +378,39 @@ export class StateStore {
     return row ? linearInstallationFromRow(row) : undefined;
   }
 
+  savePullRequest(record: {
+    jobId: string;
+    githubRepo: string;
+    branchName: string;
+    prNumber?: number;
+    url?: string;
+    status: string;
+  }): void {
+    const now = new Date().toISOString();
+    this.requireDb()
+      .query(
+        `insert into pull_requests (
+          id, job_id, github_repo, branch_name, pr_number, url, status, created_at, updated_at
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        on conflict(id) do update set
+          pr_number = excluded.pr_number,
+          url = excluded.url,
+          status = excluded.status,
+          updated_at = excluded.updated_at`,
+      )
+      .run(
+        `${record.githubRepo}:${record.branchName}`,
+        record.jobId,
+        record.githubRepo,
+        record.branchName,
+        record.prNumber ?? null,
+        record.url ?? null,
+        record.status,
+        now,
+        now,
+      );
+  }
+
   async addEvent(level: DaemonEvent["level"], message: string, jobId?: string): Promise<void> {
     this.insertEvent(level, message, jobId, new Date().toISOString());
   }
