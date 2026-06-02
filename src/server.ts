@@ -3,6 +3,7 @@ import { getIssueContext, getPrompt, getSessionId, parseLinearAgentEvent, verify
 import { applyPolicy } from "./policy";
 import { routeRepo } from "./repo-router";
 import { runJob } from "./job-runner";
+import { JobQueue } from "./job-queue";
 import { createJobId, StateStore } from "./state-store";
 
 export async function serve(configPath: string): Promise<void> {
@@ -11,6 +12,11 @@ export async function serve(configPath: string): Promise<void> {
   const state = new StateStore(config.state?.path ?? "state/daemon.sqlite");
   await state.load();
   state.syncRepoMappings(config.repos);
+  const queue = new JobQueue({
+    concurrency: config.queue?.concurrency ?? 1,
+    state,
+    execute: (job, signal) => runJob(config, job, state, { signal }),
+  });
 
   const server = Bun.serve({
     hostname: config.server.host,
@@ -23,7 +29,13 @@ export async function serve(configPath: string): Promise<void> {
       }
 
       if (request.method === "GET" && url.pathname === "/api/status") {
-        return Response.json(state.snapshot());
+        return Response.json(state.snapshot(queue.stats()));
+      }
+
+      const cancelMatch = url.pathname.match(/^\/api\/jobs\/([^/]+)\/cancel$/);
+      if (request.method === "POST" && cancelMatch) {
+        const canceled = await queue.cancel(decodeURIComponent(cancelMatch[1]!));
+        return Response.json({ ok: canceled });
       }
 
       if (request.method !== "POST" || url.pathname !== "/webhooks/linear") {
@@ -47,11 +59,7 @@ export async function serve(configPath: string): Promise<void> {
 
         const job = { id: createJobId(sessionId), sessionId, prompt, issue, repo, policy };
         await state.createJob(job);
-        queueMicrotask(() => {
-          runJob(config, job, state).catch((error) => {
-            console.error("Job failed", error);
-          });
-        });
+        queue.enqueue(job);
 
         return Response.json({ ok: true, queued: true, sessionId, jobId: job.id });
       } catch (error) {
@@ -59,6 +67,19 @@ export async function serve(configPath: string): Promise<void> {
         return Response.json({ error: message }, { status: 400 });
       }
     },
+  });
+
+  const shutdown = async () => {
+    console.log("tetherbox shutting down");
+    await queue.shutdown({ graceMs: config.queue?.shutdownGraceMs ?? 30_000 });
+    state.close();
+    server.stop(true);
+  };
+  process.once("SIGINT", () => {
+    void shutdown();
+  });
+  process.once("SIGTERM", () => {
+    void shutdown();
   });
 
   console.log(`tetherbox listening on http://${server.hostname}:${server.port}`);

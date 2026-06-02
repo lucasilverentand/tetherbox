@@ -11,6 +11,10 @@ export interface BridgeConfig {
     path: string;
     worktreeRetentionDays?: number;
   };
+  queue?: {
+    concurrency?: number;
+    shutdownGraceMs?: number;
+  };
   linear: {
     webhookSecretEnv: string;
     apiKeyEnv?: string;
@@ -83,7 +87,7 @@ export interface CodexNotification {
   params?: Record<string, unknown>;
 }
 
-export type JobStatus = "queued" | "running" | "waiting_approval" | "denied" | "completed" | "failed";
+export type JobStatus = "queued" | "running" | "waiting_approval" | "denied" | "completed" | "failed" | "canceled";
 
 export interface JobRecord {
   id: string;
@@ -98,11 +102,23 @@ export interface JobRecord {
   policyDecision: PolicyDecision;
   createdAt: string;
   updatedAt: string;
+  startedAt?: string;
+  completedAt?: string;
+  canceledAt?: string;
   lastMessage: string;
+  retryEligible: boolean;
+  retryCount: number;
+  failureReason?: string;
 }
 
 export interface DaemonState {
   startedAt: string;
+  queue?: {
+    accepting: boolean;
+    concurrency: number;
+    running: number;
+    queued: number;
+  };
   jobs: JobRecord[];
   events: DaemonEvent[];
 }

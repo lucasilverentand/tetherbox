@@ -1,27 +1,39 @@
 import { CodexAppServerClient } from "./codex-app-server";
+import { JobCanceledError, type JobQueueResult } from "./job-queue";
 import { postLinearActivity } from "./linear";
 import type { StateStore } from "./state-store";
 import type { BridgeConfig, RoutedJob } from "./types";
 import { prepareWorktree } from "./worktree-manager";
 
-export async function runJob(config: BridgeConfig, job: RoutedJob, state: StateStore): Promise<void> {
+export interface RunJobOptions {
+  signal?: AbortSignal;
+}
+
+export async function runJob(
+  config: BridgeConfig,
+  job: RoutedJob,
+  state: StateStore,
+  options: RunJobOptions = {},
+): Promise<JobQueueResult> {
   await postLinearActivity(`Policy: ${job.policy.ruleName} -> ${job.policy.decision}.`);
 
   if (job.policy.decision === "deny") {
-    await state.updateJob(job.id, "denied", "Denied by local policy");
     await postLinearActivity("Denied by local policy.");
-    return;
+    return { status: "denied", message: "Denied by local policy" };
   }
 
   if (job.policy.decision === "require_approval") {
-    await state.updateJob(job.id, "waiting_approval", "Approval required before running local Codex");
     await postLinearActivity("Approval required before running local Codex.");
-    return;
+    return { status: "waiting_approval", message: "Approval required before running local Codex" };
   }
 
   const client = new CodexAppServerClient(config.codex.bin);
+  const stopOnCancel = () => client.stop();
 
   try {
+    throwIfCanceled(options.signal);
+    options.signal?.addEventListener("abort", stopOnCancel, { once: true });
+
     const worktree = await prepareWorktree(config, job);
     await state.setJobWorktree(job.id, worktree);
 
@@ -40,9 +52,9 @@ export async function runJob(config: BridgeConfig, job: RoutedJob, state: StateS
       .filter(Boolean)
       .join("\n");
 
-    await state.updateJob(job.id, "running", `Started local Codex run in ${job.repo.github}`);
     await postLinearActivity(`Created branch ${worktree.branchName}.`);
     await postLinearActivity(`Started local Codex run in ${job.repo.github}.`);
+    throwIfCanceled(options.signal);
     await client.runTurn({
       cwd: worktree.path,
       input: prompt,
@@ -54,13 +66,26 @@ export async function runJob(config: BridgeConfig, job: RoutedJob, state: StateS
         }
       },
     });
-    await state.updateJob(job.id, "completed", "Codex turn completed");
+    throwIfCanceled(options.signal);
     await postLinearActivity("Codex turn completed.");
+    return { status: "completed", message: "Codex turn completed" };
   } catch (error) {
+    if (options.signal?.aborted) {
+      await postLinearActivity("Codex job canceled.");
+      throw new JobCanceledError();
+    }
+
     const message = error instanceof Error ? error.message : "Codex job failed";
-    await state.updateJob(job.id, "failed", message);
     await postLinearActivity(`Codex job failed: ${message}`);
+    throw error;
   } finally {
+    options.signal?.removeEventListener("abort", stopOnCancel);
     client.stop();
+  }
+}
+
+function throwIfCanceled(signal?: AbortSignal): void {
+  if (signal?.aborted) {
+    throw new JobCanceledError();
   }
 }

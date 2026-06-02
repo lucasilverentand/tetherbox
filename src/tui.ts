@@ -47,6 +47,13 @@ async function draw(options: TuiOptions): Promise<void> {
     const state = (await response.json()) as DaemonState;
     process.stdout.write(`Daemon started: ${formatDate(state.startedAt)}\n`);
     process.stdout.write(`Jobs: ${state.jobs.length} | Events: ${state.events.length}\n\n`);
+    if (state.queue) {
+      const accepting = state.queue.accepting ? "accepting" : "draining";
+      process.stdout.write(
+        `Queue: ${accepting} | running ${state.queue.running}/${state.queue.concurrency} | queued ${state.queue.queued}\n\n`,
+      );
+    }
+
     process.stdout.write("Recent Jobs\n");
     process.stdout.write("-----------\n");
 

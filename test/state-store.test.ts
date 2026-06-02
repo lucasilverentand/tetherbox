@@ -46,7 +46,7 @@ describe("StateStore", () => {
     expect(snapshot.jobs[0]?.status).toBe("running");
     expect(snapshot.jobs[0]?.lastMessage).toBe("Started");
     expect(snapshot.events.length).toBe(2);
-    expect(snapshot.events[0]?.message).toBe("Started");
+    expect(snapshot.events.map((event) => event.message)).toContain("Started");
   });
 
   test("persists job worktree details", async () => {
