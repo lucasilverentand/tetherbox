@@ -121,7 +121,11 @@ Jobs with `require_approval` create a pending Linear approval and enter `waiting
 
 ## Design
 
-See [docs/design.md](docs/design.md).
+See:
+
+- [Setup](docs/setup.md)
+- [Security](docs/security.md)
+- [Design](docs/design.md)
 
 ## License
 
