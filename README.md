@@ -83,7 +83,7 @@ Run the daemon as the same user that owns Codex auth, GitHub auth, SSH keys, and
 
 ## Linear Webhook
 
-Create a Linear OAuth application for the agent and install it with `actor=app`. Request `app:assignable` so issues can be delegated to the agent and `app:mentionable` so users can mention it in comments, documents, and other editor surfaces. Enable the Agent session events webhook category.
+Create a Linear OAuth application for the agent and install it with `actor=app`. Request `app:assignable` so issues can be delegated to the agent and `app:mentionable` so users can mention it in comments, documents, and other editor surfaces. Enable the Agent session events, Permission changes, and OAuth app webhook categories.
 
 Configure the Linear agent app webhook URL:
 
@@ -106,6 +106,7 @@ https://your-public-host.example.com/oauth/linear/start
 
 Tetherbox redirects to Linear with `actor=app`, validates the callback state, exchanges the authorization code, stores the app actor token in SQLite, and refreshes stored tokens before GraphQL calls when needed.
 When an installed app actor starts work on an issue, Tetherbox follows Linear agent best practices by moving the issue into the team's first started workflow state when needed and setting the stored app user as the issue delegate when no delegate is already set.
+Permission-change webhooks are recorded as daemon audit events. OAuth app revocation webhooks remove the stored installation token so the app must be reinstalled before Tetherbox can post Linear activity or update delegated issues again.
 
 ## Policy Config
 

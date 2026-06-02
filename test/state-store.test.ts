@@ -144,6 +144,8 @@ describe("StateStore", () => {
       accessToken: "access-1",
       refreshToken: "refresh-1",
     });
+    reloaded.deleteLinearInstallation("default");
+    expect(reloaded.getLinearInstallation("default")).toBeUndefined();
     reloaded.close();
   });
 

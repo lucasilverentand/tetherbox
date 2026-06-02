@@ -227,6 +227,101 @@ describe("server webhook handling", () => {
     }
   });
 
+  test("records Linear permission-change webhooks without queueing work", async () => {
+    const state = await loadedState();
+    const queue = new FakeQueue();
+    const handler = createRequestHandler({
+      config,
+      state,
+      queue,
+      webhookSecret: "secret",
+    });
+    const body = JSON.stringify({
+      type: "PermissionChange",
+      action: "teamAccessChanged",
+      appUserId: "app-user-1",
+      canAccessAllPublicTeams: false,
+      addedTeamIds: ["team-added"],
+      removedTeamIds: ["team-removed"],
+    });
+
+    try {
+      const response = await handler(
+        new Request("http://127.0.0.1:8787/webhooks/linear", {
+          method: "POST",
+          headers: { "Linear-Signature": signature(body, "secret") },
+          body,
+        }),
+      );
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        ok: true,
+        accepted: true,
+        eventType: "PermissionChange",
+        action: "teamAccessChanged",
+      });
+      expect(queue.jobs).toHaveLength(0);
+      expect(state.snapshot().jobs).toHaveLength(0);
+      expect(state.snapshot().events[0]).toMatchObject({
+        level: "info",
+        source: "linear",
+        message: expect.stringContaining("added teams: team-added"),
+      });
+      expect(state.snapshot().events[0]?.message).toContain("removed teams: team-removed");
+    } finally {
+      state.close();
+    }
+  });
+
+  test("records Linear OAuth revocation webhooks and removes stored installation", async () => {
+    const state = await loadedState();
+    const queue = new FakeQueue();
+    state.saveLinearInstallation({
+      workspaceId: "default",
+      appUserId: "app-user-1",
+      accessToken: "lin_access",
+      refreshToken: "lin_refresh",
+    });
+    const handler = createRequestHandler({
+      config,
+      state,
+      queue,
+      webhookSecret: "secret",
+    });
+    const body = JSON.stringify({
+      type: "OAuthApp",
+      action: "revoked",
+    });
+
+    try {
+      const response = await handler(
+        new Request("http://127.0.0.1:8787/webhooks/linear", {
+          method: "POST",
+          headers: { "Linear-Signature": signature(body, "secret") },
+          body,
+        }),
+      );
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        ok: true,
+        accepted: true,
+        eventType: "OAuthApp",
+        action: "revoked",
+      });
+      expect(queue.jobs).toHaveLength(0);
+      expect(state.getLinearInstallation("default")).toBeUndefined();
+      expect(state.snapshot().events[0]).toMatchObject({
+        level: "warn",
+        source: "linear",
+        message: expect.stringContaining("OAuth app was revoked"),
+      });
+    } finally {
+      state.close();
+    }
+  });
+
   test("rejects malformed Linear webhook JSON without queueing jobs", async () => {
     const state = await loadedState();
     const queue = new FakeQueue();

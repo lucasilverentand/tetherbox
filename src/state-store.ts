@@ -583,6 +583,10 @@ export class StateStore {
     return row ? linearInstallationFromRow(row) : undefined;
   }
 
+  deleteLinearInstallation(workspaceId = "default"): void {
+    this.requireDb().query("delete from workspace_installations where workspace_id = ?").run(workspaceId);
+  }
+
   savePullRequest(record: {
     jobId: string;
     githubRepo: string;
