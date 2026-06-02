@@ -27,9 +27,16 @@ describe("server webhook handling", () => {
           id: "issue-1",
           identifier: "OSS-1",
           title: "Fix this",
+          description: "The checkout flow is broken.",
           teamKey: "WEB",
-          labels: [],
+          labels: ["Bug"],
+          url: "https://linear.app/seventwo/issue/OSS-1/fix-this",
         },
+        comment: {
+          body: "The latest repro is in staging.",
+          user: { name: "Luca" },
+        },
+        guidance: [{ origin: "project", teamName: "Open Source", body: "Keep the fix minimal." }],
       },
     });
 
@@ -72,6 +79,10 @@ describe("server webhook handling", () => {
       await waitFor(() => queue.jobs.length === 1);
 
       expect(queue.jobs[0]?.repo.github).toBe("lucasilverentand/api");
+      expect(queue.jobs[0]?.prompt).toContain("OSS-1: Fix this");
+      expect(queue.jobs[0]?.prompt).toContain("The checkout flow is broken.");
+      expect(queue.jobs[0]?.prompt).toContain("The latest repro is in staging.");
+      expect(queue.jobs[0]?.prompt).toContain("Keep the fix minimal.");
       expect(state.snapshot().jobs[0]?.id).toBe(queue.jobs[0]?.id);
     } finally {
       fetchMock.restore();

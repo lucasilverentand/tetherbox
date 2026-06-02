@@ -1,6 +1,7 @@
 import { loadConfig, getRequiredEnv } from "./config";
 import { assertSupportedCodexCli } from "./codex-version";
 import {
+  buildLinearJobPrompt,
   getIssueContext,
   getPrompt,
   getSessionId,
@@ -145,14 +146,15 @@ interface LinearWebhookIntakeOptions {
 async function intakeLinearWebhook(options: LinearWebhookIntakeOptions): Promise<void> {
   const { config, state, queue, event, sessionId, jobId } = options;
   const issue = getIssueContext(event);
-  const prompt = getPrompt(event);
+  const prompt = buildLinearJobPrompt(event);
+  const replyPrompt = getPrompt(event);
   const externalUrl = statusExternalUrl(config, jobId);
   const handledApproval = await maybeHandleApprovalReply({
     config,
     state,
     queue,
     sessionId,
-    prompt,
+    prompt: replyPrompt,
   });
   if (handledApproval) {
     return;
