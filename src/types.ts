@@ -167,6 +167,7 @@ export interface LinearGuidanceContext {
 export interface RoutedJob {
   id: string;
   sessionId: string;
+  linearWorkspaceId?: string;
   prompt: string;
   issue: LinearIssueContext;
   repo: RepoMapping;
@@ -189,6 +190,7 @@ export type JobStatus = "queued" | "running" | "waiting_approval" | "denied" | "
 export interface JobRecord {
   id: string;
   sessionId: string;
+  linearWorkspaceId?: string;
   status: JobStatus;
   repo: string;
   prompt?: string;

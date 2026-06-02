@@ -9,6 +9,7 @@ import type { WorktreeInfo } from "./worktree-manager";
 interface JobRow {
   id: string;
   session_id: string;
+  linear_workspace_id: string | null;
   status: JobStatus;
   repo: string;
   prompt: string | null;
@@ -101,6 +102,7 @@ interface PendingApprovalRow {
 export interface PendingRepoSelectionRecord {
   id: string;
   sessionId: string;
+  linearWorkspaceId?: string;
   jobId: string;
   prompt: string;
   issue: LinearIssueContext;
@@ -111,6 +113,7 @@ export interface PendingRepoSelectionRecord {
 interface PendingRepoSelectionRow {
   id: string;
   session_id: string;
+  linear_workspace_id: string | null;
   job_id: string;
   prompt: string;
   issue_json: string;
@@ -235,10 +238,11 @@ export class StateStore {
       );
       db.query(
         `insert into jobs (
-          id, session_id, status, repo, prompt, issue_identifier, issue_title, policy_rule,
+          id, session_id, linear_workspace_id, status, repo, prompt, issue_identifier, issue_title, policy_rule,
           policy_decision, created_at, updated_at, last_message, retry_eligible, retry_count
-        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         on conflict(id) do update set
+          linear_workspace_id = excluded.linear_workspace_id,
           status = excluded.status,
           repo = excluded.repo,
           prompt = excluded.prompt,
@@ -257,6 +261,7 @@ export class StateStore {
       ).run(
         record.id,
         record.sessionId,
+        job.linearWorkspaceId ?? null,
         record.status,
         record.repo,
         job.prompt,
@@ -492,7 +497,7 @@ export class StateStore {
   }
 
   createRepoSelection(
-    job: Pick<RoutedJob, "id" | "sessionId" | "prompt" | "issue">,
+    job: Pick<RoutedJob, "id" | "sessionId" | "linearWorkspaceId" | "prompt" | "issue">,
     processedWebhookDeliveryId?: string,
   ): PendingRepoSelectionRecord {
     const db = this.requireDb();
@@ -521,16 +526,17 @@ export class StateStore {
       );
       db.query(
         `insert into repo_selections (
-          id, session_id, job_id, prompt, issue_json, status, created_at, updated_at
-        ) values (?, ?, ?, ?, ?, 'pending', ?, ?)
+          id, session_id, linear_workspace_id, job_id, prompt, issue_json, status, created_at, updated_at
+        ) values (?, ?, ?, ?, ?, ?, 'pending', ?, ?)
         on conflict(id) do update set
+          linear_workspace_id = excluded.linear_workspace_id,
           job_id = excluded.job_id,
           prompt = excluded.prompt,
           issue_json = excluded.issue_json,
           status = 'pending',
           selected_repo = null,
           updated_at = excluded.updated_at`,
-      ).run(id, job.sessionId, job.id, job.prompt, issueJson, now, now);
+      ).run(id, job.sessionId, job.linearWorkspaceId ?? null, job.id, job.prompt, issueJson, now, now);
       if (processedWebhookDeliveryId) {
         this.insertProcessedWebhookDelivery(processedWebhookDeliveryId, "linear", now);
       }
@@ -539,6 +545,7 @@ export class StateStore {
     return {
       id,
       sessionId: job.sessionId,
+      linearWorkspaceId: job.linearWorkspaceId,
       jobId: job.id,
       prompt: job.prompt,
       issue: job.issue,
@@ -779,6 +786,7 @@ export class StateStore {
       create table if not exists jobs (
         id text primary key,
         session_id text not null references sessions(id) on delete cascade,
+        linear_workspace_id text,
         status text not null,
         repo text not null,
         prompt text,
@@ -823,6 +831,7 @@ export class StateStore {
       create table if not exists repo_selections (
         id text primary key,
         session_id text not null references sessions(id) on delete cascade,
+        linear_workspace_id text,
         job_id text not null,
         prompt text not null,
         issue_json text not null,
@@ -850,6 +859,8 @@ export class StateStore {
       create index if not exists idx_processed_webhooks_received_at on processed_webhooks(received_at);
     `);
     this.addColumnIfMissing("jobs", "prompt", "text");
+    this.addColumnIfMissing("jobs", "linear_workspace_id", "text");
+    this.addColumnIfMissing("repo_selections", "linear_workspace_id", "text");
     this.addColumnIfMissing("sessions", "issue_team_id", "text");
     this.addColumnIfMissing("approvals", "expires_at", "text");
     this.addColumnIfMissing("job_events", "source", "text not null default 'daemon'");
@@ -927,6 +938,7 @@ function jobFromRow(row: JobRow, redactForOutput = false): JobRecord {
   const record = {
     id: row.id,
     sessionId: row.session_id,
+    linearWorkspaceId: row.linear_workspace_id ?? undefined,
     status: row.status,
     repo: row.repo,
     prompt: row.prompt ?? undefined,
@@ -964,6 +976,7 @@ function repoSelectionFromRow(row: PendingRepoSelectionRow): PendingRepoSelectio
   return {
     id: row.id,
     sessionId: row.session_id,
+    linearWorkspaceId: row.linear_workspace_id ?? undefined,
     jobId: row.job_id,
     prompt: row.prompt,
     issue: JSON.parse(row.issue_json) as LinearIssueContext,

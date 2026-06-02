@@ -14,6 +14,7 @@ import {
   getIssueContext,
   getLinearInboxNotificationWebhook,
   getLinearManagementWebhook,
+  linearWorkspaceIdForEvent,
   getPrompt,
   getSessionId,
   parseLinearAgentEvent,
@@ -61,6 +62,11 @@ describe("Linear webhook handling", () => {
     expect(getSessionId(event)).toBe("sess_1");
     expect(getPrompt(event)).toContain("Fix this");
     expect(getIssueContext(event)).toMatchObject({ labels: ["docs"], teamId: "team-1", teamKey: "ENG" });
+  });
+
+  test("derives Linear installation workspace IDs from webhook organization IDs", () => {
+    expect(linearWorkspaceIdForEvent(parseLinearAgentEvent(JSON.stringify({ organizationId: "org-1" })))).toBe("org-1");
+    expect(linearWorkspaceIdForEvent(parseLinearAgentEvent(JSON.stringify({ organizationId: " " })))).toBeUndefined();
   });
 
   test("recognizes supported Agent Session webhook actions", () => {
@@ -1049,6 +1055,68 @@ describe("Linear webhook handling", () => {
     }
   });
 
+  test("uses scoped Linear installation tokens and app delegates for issue lifecycle sync", async () => {
+    const calls: unknown[] = [];
+    const restore = mockFetchSequence(calls, [
+      new Response(
+        JSON.stringify({
+          data: {
+            issue: {
+              id: "issue-uuid",
+              identifier: "OSS-1",
+              state: { id: "state-start", name: "In Progress", type: "started" },
+              team: { id: "team-1" },
+              delegate: null,
+            },
+          },
+        }),
+        { status: 200 },
+      ),
+      new Response(JSON.stringify({ data: { issueUpdate: { success: true, issue: { id: "issue-uuid" } } } }), {
+        status: 200,
+      }),
+    ]);
+    const store = await loadedState();
+    store.saveLinearInstallation({
+      workspaceId: "default",
+      appUserId: "default-app-user",
+      accessToken: "default-access",
+    });
+    store.saveLinearInstallation({
+      workspaceId: "org-1",
+      appUserId: "org-app-user",
+      accessToken: "org-access",
+    });
+
+    try {
+      const result = await syncLinearIssueForAgentSession(
+        { ...config, linear: { webhookSecretEnv: "LINEAR_WEBHOOK_SECRET" } },
+        { id: "issue-uuid", identifier: "OSS-1", labels: [] },
+        store,
+        "org-1",
+      );
+
+      expect(result).toEqual({
+        issueId: "OSS-1",
+        delegateSet: true,
+      });
+      expect(calls[0]).toMatchObject({ headers: { Authorization: "Bearer org-access" } });
+      expect(calls[1]).toMatchObject({
+        headers: { Authorization: "Bearer org-access" },
+        body: {
+          variables: {
+            input: {
+              delegateId: "org-app-user",
+            },
+          },
+        },
+      });
+    } finally {
+      restore();
+      store.close();
+    }
+  });
+
   test("skips issue lifecycle updates when status and delegate are already current", async () => {
     const calls: unknown[] = [];
     const restore = mockFetchSequence(calls, [
@@ -1293,7 +1361,9 @@ describe("Linear webhook handling", () => {
         }),
         { status: 200 },
       ),
-      new Response(JSON.stringify({ data: { viewer: { id: "app-user-1" } } }), { status: 200 }),
+      new Response(JSON.stringify({ data: { viewer: { id: "app-user-1", organization: { id: "org-1" } } } }), {
+        status: 200,
+      }),
     ]);
     const store = await loadedState();
     store.createLinearOAuthState("state-1", "https://bridge.example/oauth/linear/callback", futureDate());
@@ -1306,10 +1376,14 @@ describe("Linear webhook handling", () => {
       );
 
       expect(installation).toMatchObject({
-        workspaceId: "default",
+        workspaceId: "org-1",
         appUserId: "app-user-1",
         accessToken: "access-1",
         refreshToken: "refresh-1",
+      });
+      expect(store.getLinearInstallation("org-1")).toMatchObject({
+        appUserId: "app-user-1",
+        accessToken: "access-1",
       });
       expect(calls[0]).toMatchObject({
         body: "grant_type=authorization_code&code=code-1&redirect_uri=https%3A%2F%2Fbridge.example%2Foauth%2Flinear%2Fcallback&client_id=client-1&client_secret=secret-1",
@@ -1355,6 +1429,54 @@ describe("Linear webhook handling", () => {
       expect(calls[0]).toMatchObject({ body: "grant_type=refresh_token&refresh_token=refresh-1&client_id=client-1&client_secret=secret-1" });
       expect(calls[1]).toMatchObject({ headers: { Authorization: "Bearer access-2" } });
       expect(store.getLinearInstallation("default")?.refreshToken).toBe("refresh-2");
+    } finally {
+      restore();
+      store.close();
+      delete process.env.LINEAR_CLIENT_ID;
+      delete process.env.LINEAR_CLIENT_SECRET;
+    }
+  });
+
+  test("refreshes scoped Linear tokens before GraphQL calls", async () => {
+    process.env.LINEAR_CLIENT_ID = "client-1";
+    process.env.LINEAR_CLIENT_SECRET = "secret-1";
+    delete process.env.LINEAR_API_KEY;
+    const calls: unknown[] = [];
+    const restore = mockFetchSequence(calls, [
+      new Response(
+        JSON.stringify({
+          access_token: "access-scoped-2",
+          refresh_token: "refresh-scoped-2",
+          token_type: "Bearer",
+          expires_in: 3600,
+          scope: "read write",
+        }),
+        { status: 200 },
+      ),
+      new Response(JSON.stringify({ data: { agentActivityCreate: { success: true } } }), { status: 200 }),
+    ]);
+    const store = await loadedState();
+    store.saveLinearInstallation({
+      workspaceId: "default",
+      accessToken: "default-access",
+    });
+    store.saveLinearInstallation({
+      workspaceId: "org-1",
+      accessToken: "access-scoped-1",
+      refreshToken: "refresh-scoped-1",
+      tokenType: "Bearer",
+      scope: "read write",
+      expiresAt: "2020-01-01T00:00:00.000Z",
+    });
+
+    try {
+      await postLinearActivity(oauthConfig, "sess_1", { type: "thought", body: "Working" }, store, "org-1");
+      expect(calls[0]).toMatchObject({
+        body: "grant_type=refresh_token&refresh_token=refresh-scoped-1&client_id=client-1&client_secret=secret-1",
+      });
+      expect(calls[1]).toMatchObject({ headers: { Authorization: "Bearer access-scoped-2" } });
+      expect(store.getLinearInstallation("org-1")?.refreshToken).toBe("refresh-scoped-2");
+      expect(store.getLinearInstallation("default")?.accessToken).toBe("default-access");
     } finally {
       restore();
       store.close();

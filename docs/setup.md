@@ -72,6 +72,7 @@ https://your-public-host.example.com/oauth/linear/start
 ```
 
 Tetherbox redirects to Linear with `actor=app`, validates callback state, exchanges the OAuth code, and stores the app actor token in SQLite. Customer and initiative scopes are read-only by default; override `linear.oauthScopes` with an explicit full scope list that includes write-level customer or initiative scopes only if you intentionally extend Tetherbox to modify those records.
+When Linear webhook payloads include `organizationId`, Tetherbox uses that organization-scoped installation for Agent Activity, Agent Session updates, repository suggestions, and issue lifecycle updates. The legacy default installation remains a fallback for older payloads and single-workspace setups.
 After installation, `/api/status` and the operator TUI show non-secret Linear connection status, including whether the app actor token is installed.
 That stored app user ID is also used to set the issue delegate when a session starts. If the delegated issue is still in backlog or another non-started state, Tetherbox moves it to the team's first started workflow state before queueing local Codex work. The local Codex prompt includes Linear issue text, comments, guidance, activity history, and structured workspace metadata such as projects, initiatives, customer requests, related issues, and linked documents when Linear includes those fields in the webhook payload.
 When API access is available, Tetherbox reads Agent Session activities across paginated Linear history and includes their frozen prompt/action/response history in the local Codex prompt so follow-up work is not dependent on editable comments alone. The history is capped by `linear.agentActivityHistoryLimit` to keep webhook intake predictable.
@@ -85,7 +86,7 @@ After successful implementation, created or updated GitHub pull requests are add
 Set Linear's webhook signing secret in the env var named by `linear.webhookSecretEnv`.
 
 Tetherbox verifies `Linear-Signature` with HMAC-SHA256 over the raw request body. Invalid signatures are rejected before parsing JSON.
-Agent Session webhooks can queue or steer local Codex jobs. Inbox Notification webhooks record local audit events for direct app-user involvement; mention, comment, assignment, and reaction notifications are copied into matching active job timelines, while `issueUnassignedFromYou` and terminal `issueStatusChanged` notifications cancel matching active local jobs. Permission-change webhooks only record local audit events, and OAuth app revocation webhooks remove the stored app actor token so the daemon will require reinstall before it can post Linear activity or update delegated issues again.
+Agent Session webhooks can queue or steer local Codex jobs. Inbox Notification webhooks record local audit events for direct app-user involvement; mention, comment, assignment, and reaction notifications are copied into matching active job timelines, while `issueUnassignedFromYou` and terminal `issueStatusChanged` notifications cancel matching active local jobs. Permission-change webhooks only record local audit events, and OAuth app revocation webhooks remove the matching organization-scoped app actor token so the daemon will require reinstall before it can post Linear activity or update delegated issues for that organization again.
 
 ## Tunnel Options
 

@@ -179,6 +179,10 @@ export function getAgentSessionAction(event: LinearAgentSessionEvent): LinearAge
   return event.action === "created" || event.action === "prompted" ? event.action : undefined;
 }
 
+export function linearWorkspaceIdForEvent(event: Pick<LinearAgentSessionEvent, "organizationId">): string | undefined {
+  return event.organizationId?.trim() || undefined;
+}
+
 export function getLinearManagementWebhook(event: LinearAgentSessionEvent): LinearManagementWebhook | undefined {
   if (event.type === "PermissionChange" && event.action === "teamAccessChanged") {
     return {
@@ -341,8 +345,9 @@ export async function postLinearActivity(
   agentSessionId: string,
   activity: LinearActivityContent | LinearActivityInput,
   tokenStore?: LinearTokenStore,
+  workspaceId?: string,
 ): Promise<void> {
-  const token = await getLinearAccessToken(config, tokenStore);
+  const token = await getLinearAccessToken(config, tokenStore, workspaceId);
   const input = redactValue(linearActivityInput(agentSessionId, activity));
   if (!token) {
     logLinearFallback("agentActivityCreate", input);
@@ -374,8 +379,9 @@ export async function updateLinearAgentSession(
     removedExternalUrls?: LinearExternalUrl[];
   },
   tokenStore?: LinearTokenStore,
+  workspaceId?: string,
 ): Promise<void> {
-  const token = await getLinearAccessToken(config, tokenStore);
+  const token = await getLinearAccessToken(config, tokenStore, workspaceId);
   const redactedInput = redactValue(input);
   if (!token) {
     logLinearFallback("agentSessionUpdate", { agentSessionId, input: redactedInput });
@@ -400,8 +406,9 @@ export async function suggestLinearRepositories(
   issueId: string | undefined,
   agentSessionId: string,
   tokenStore?: LinearTokenStore,
+  workspaceId?: string,
 ): Promise<LinearRepositorySuggestion[]> {
-  const token = await getLinearAccessToken(config, tokenStore);
+  const token = await getLinearAccessToken(config, tokenStore, workspaceId);
   if (!token || !issueId || config.repos.length === 0) {
     logLinearFallback("issueRepositorySuggestions", { issueId, agentSessionId });
     return [];
@@ -447,8 +454,9 @@ export async function listLinearAgentSessionActivities(
   agentSessionId: string,
   tokenStore?: LinearTokenStore,
   first = 25,
+  workspaceId?: string,
 ): Promise<LinearAgentSessionActivity[]> {
-  const token = await getLinearAccessToken(config, tokenStore);
+  const token = await getLinearAccessToken(config, tokenStore, workspaceId);
   if (!token) {
     logLinearFallback("agentSessionActivities", { agentSessionId });
     return [];
@@ -556,13 +564,14 @@ export async function syncLinearIssueForAgentSession(
   config: BridgeConfig,
   issue: LinearIssueContext,
   tokenStore?: LinearTokenStore,
+  workspaceId?: string,
 ): Promise<LinearIssueLifecycleResult> {
   const issueId = issue.id ?? issue.identifier;
   if (!issueId) {
     return { skippedReason: "missing_issue" };
   }
 
-  const token = await getLinearAccessToken(config, tokenStore);
+  const token = await getLinearAccessToken(config, tokenStore, workspaceId);
   if (!token) {
     logLinearFallback("issueLifecycleSync", { issueId });
     return { issueId, skippedReason: "missing_token" };
@@ -588,7 +597,7 @@ export async function syncLinearIssueForAgentSession(
     result.movedToState = startedState.name;
   }
 
-  const appUserId = tokenStore?.getLinearInstallation("default")?.appUserId;
+  const appUserId = getLinearInstallationForWorkspace(tokenStore, workspaceId)?.appUserId;
   if (!current.delegate?.id && appUserId) {
     update.delegateId = appUserId;
     result.delegateSet = true;
@@ -606,13 +615,14 @@ export async function moveLinearIssueToReviewState(
   config: BridgeConfig,
   issue: LinearIssueContext,
   tokenStore?: LinearTokenStore,
+  workspaceId?: string,
 ): Promise<LinearIssueReviewStateResult> {
   const issueId = issue.id ?? issue.identifier;
   if (!issueId) {
     return { skippedReason: "missing_issue" };
   }
 
-  const token = await getLinearAccessToken(config, tokenStore);
+  const token = await getLinearAccessToken(config, tokenStore, workspaceId);
   if (!token) {
     logLinearFallback("issueReviewStateSync", { issueId, stateName: reviewStateName(config) });
     return { issueId, skippedReason: "missing_token" };
@@ -686,7 +696,7 @@ export async function completeLinearOAuthCallback(
   });
   const viewer = await fetchLinearViewer(config, token.access_token);
   const installation = {
-    workspaceId: "default",
+    workspaceId: viewer.organizationId ?? "default",
     appUserId: viewer.id,
     accessToken: token.access_token,
     refreshToken: token.refresh_token,
@@ -695,7 +705,7 @@ export async function completeLinearOAuthCallback(
     expiresAt: expiresAt(token.expires_in),
   };
   stateStore.saveLinearInstallation(installation);
-  return stateStore.getLinearInstallation("default")!;
+  return stateStore.getLinearInstallation(installation.workspaceId)!;
 }
 
 export function statusExternalUrl(config: BridgeConfig, jobId: string): LinearExternalUrl | undefined {
@@ -709,14 +719,18 @@ export function statusExternalUrl(config: BridgeConfig, jobId: string): LinearEx
   };
 }
 
-async function getLinearAccessToken(config: BridgeConfig, tokenStore?: LinearTokenStore): Promise<string | undefined> {
+async function getLinearAccessToken(
+  config: BridgeConfig,
+  tokenStore?: LinearTokenStore,
+  workspaceId?: string,
+): Promise<string | undefined> {
   const envName = config.linear.apiKeyEnv;
   const envToken = envName ? process.env[envName] : undefined;
   if (envToken) {
     return envToken;
   }
 
-  const installation = tokenStore?.getLinearInstallation("default");
+  const installation = getLinearInstallationForWorkspace(tokenStore, workspaceId);
   if (!installation) {
     return undefined;
   }
@@ -743,6 +757,24 @@ async function getLinearAccessToken(config: BridgeConfig, tokenStore?: LinearTok
     expiresAt: expiresAt(refreshed.expires_in),
   });
   return refreshed.access_token;
+}
+
+function getLinearInstallationForWorkspace(
+  tokenStore: LinearTokenStore | undefined,
+  workspaceId: string | undefined,
+): LinearInstallationRecord | undefined {
+  if (!tokenStore) {
+    return undefined;
+  }
+
+  if (workspaceId) {
+    const scoped = tokenStore.getLinearInstallation(workspaceId);
+    if (scoped) {
+      return scoped;
+    }
+  }
+
+  return tokenStore.getLinearInstallation("default");
 }
 
 async function linearGraphql<T>(
@@ -1231,12 +1263,22 @@ async function exchangeLinearOAuthToken(
   };
 }
 
-async function fetchLinearViewer(config: BridgeConfig, accessToken: string): Promise<{ id?: string }> {
-  const data = await linearGraphql<{ viewer?: { id?: string } }>(accessToken, config.linear.apiTimeoutMs, {
-    query: `query Viewer { viewer { id } }`,
-    variables: {},
-  });
-  return data.viewer ?? {};
+async function fetchLinearViewer(
+  config: BridgeConfig,
+  accessToken: string,
+): Promise<{ id?: string; organizationId?: string }> {
+  const data = await linearGraphql<{ viewer?: { id?: string; organization?: { id?: string } } }>(
+    accessToken,
+    config.linear.apiTimeoutMs,
+    {
+      query: `query Viewer { viewer { id organization { id } } }`,
+      variables: {},
+    },
+  );
+  return {
+    id: data.viewer?.id,
+    organizationId: data.viewer?.organization?.id,
+  };
 }
 
 function getOAuthRedirectUri(config: BridgeConfig): string {
