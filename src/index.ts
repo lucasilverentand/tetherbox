@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 
 import { serve } from "./server";
+import { runTui } from "./tui";
 
 function getArg(name: string): string | undefined {
   const index = process.argv.indexOf(name);
@@ -13,9 +14,17 @@ function getArg(name: string): string | undefined {
 async function main(): Promise<void> {
   const command = process.argv[2];
 
-  if (command !== "serve") {
-    console.error("Usage: local-linear-codex-bridge serve --config <path>");
+  if (command !== "serve" && command !== "daemon" && command !== "tui") {
+    console.error("Usage: local-linear-codex-bridge <daemon|serve|tui> [--config <path>] [--url <url>]");
     process.exit(1);
+  }
+
+  if (command === "tui") {
+    await runTui({
+      url: getArg("--url") ?? "http://127.0.0.1:8787",
+      intervalMs: Number(getArg("--interval-ms") ?? 2000),
+    });
+    return;
   }
 
   const configPath = getArg("--config");

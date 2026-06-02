@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>Label</key>
+    <string>dev.local-linear-codex-bridge</string>
+    <key>ProgramArguments</key>
+    <array>
+      <string>/usr/bin/env</string>
+      <string>bun</string>
+      <string>run</string>
+      <string>src/index.ts</string>
+      <string>daemon</string>
+      <string>--config</string>
+      <string>/Users/luca/.config/local-linear-codex-bridge/config.json</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/Volumes/DevDisk/Developer/lucasilverentand/local-linear-codex-bridge</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+  </dict>
+</plist>

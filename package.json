@@ -9,7 +9,9 @@
     "local-linear-codex-bridge": "./src/index.ts"
   },
   "scripts": {
-    "start": "bun run src/index.ts serve --config examples/config.json",
+    "start": "bun run src/index.ts daemon --config examples/config.json",
+    "daemon": "bun run src/index.ts daemon --config examples/config.json",
+    "tui": "bun run src/index.ts tui --url http://127.0.0.1:8787",
     "test": "bun test",
     "check": "bun test && bun run scripts/check-format.ts"
   },

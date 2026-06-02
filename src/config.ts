@@ -23,6 +23,7 @@ export async function loadConfig(path: string): Promise<BridgeConfig> {
 
   return {
     ...parsed,
+    state: parsed.state ?? { path: "state/daemon.json" },
     policies: parsed.policies ?? [],
   } as BridgeConfig;
 }

@@ -1,16 +1,19 @@
 import { CodexAppServerClient } from "./codex-app-server";
 import { postLinearActivity } from "./linear";
+import type { StateStore } from "./state-store";
 import type { BridgeConfig, RoutedJob } from "./types";
 
-export async function runJob(config: BridgeConfig, job: RoutedJob): Promise<void> {
+export async function runJob(config: BridgeConfig, job: RoutedJob, state: StateStore): Promise<void> {
   await postLinearActivity(`Policy: ${job.policy.ruleName} -> ${job.policy.decision}.`);
 
   if (job.policy.decision === "deny") {
+    await state.updateJob(job.id, "denied", "Denied by local policy");
     await postLinearActivity("Denied by local policy.");
     return;
   }
 
   if (job.policy.decision === "require_approval") {
+    await state.updateJob(job.id, "waiting_approval", "Approval required before running local Codex");
     await postLinearActivity("Approval required before running local Codex.");
     return;
   }
@@ -30,14 +33,25 @@ export async function runJob(config: BridgeConfig, job: RoutedJob): Promise<void
     .join("\n");
 
   try {
+    await state.updateJob(job.id, "running", `Started local Codex run in ${job.repo.github}`);
     await postLinearActivity(`Started local Codex run in ${job.repo.github}.`);
     await client.runTurn({
       cwd: job.repo.localPath,
       input: prompt,
       model: config.codex.model,
       sandbox: job.policy.sandbox,
+      onNotification: (notification) => {
+        if (notification.method) {
+          void state.addEvent("info", `Codex: ${notification.method}`, job.id);
+        }
+      },
     });
-    await postLinearActivity("Codex turn started.");
+    await state.updateJob(job.id, "completed", "Codex turn completed");
+    await postLinearActivity("Codex turn completed.");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Codex job failed";
+    await state.updateJob(job.id, "failed", message);
+    await postLinearActivity(`Codex job failed: ${message}`);
   } finally {
     client.stop();
   }

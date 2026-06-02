@@ -13,6 +13,9 @@ Early scaffold. The current app includes:
 - Basic agent-session event parsing.
 - Repository routing from local config.
 - Deterministic policy decisions.
+- Daemon state persisted to a local JSON file.
+- `/healthz` and `/api/status` daemon endpoints.
+- Terminal UI for watching jobs and events.
 - Codex App Server JSON-RPC client over `stdio`.
 - Local job runner that starts a Codex thread and turn.
 
@@ -35,10 +38,29 @@ cp examples/config.json config.local.json
 Edit `config.local.json`, then run:
 
 ```bash
-bun run src/index.ts serve --config config.local.json
+bun run src/index.ts daemon --config config.local.json
 ```
 
 The daemon listens on the configured host and port. Use a tunnel such as Cloudflare Tunnel, Tailscale Funnel, or ngrok during development so Linear can reach `/webhooks/linear`.
+
+Open the terminal UI in another shell:
+
+```bash
+bun run src/index.ts tui --url http://127.0.0.1:8787
+```
+
+Press `q` to quit.
+
+`serve` remains as an alias for `daemon`.
+
+## Service Mode
+
+Example service definitions live in `examples/`:
+
+- `dev.local-linear-codex-bridge.plist` for macOS `launchd`.
+- `local-linear-codex-bridge.service` for Linux `systemd --user`.
+
+Run the daemon as the same user that owns Codex auth, GitHub auth, SSH keys, and local repository checkouts.
 
 ## Linear Webhook
 
