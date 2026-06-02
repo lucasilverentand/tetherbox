@@ -1,4 +1,4 @@
-import { suggestLinearRepositories } from "./linear";
+import { suggestLinearRepositories, type LinearTokenStore } from "./linear";
 import type { BridgeConfig, LinearIssueContext, RepoMapping } from "./types";
 
 export function routeRepo(config: BridgeConfig, issue: LinearIssueContext, prompt: string): RepoMapping {
@@ -24,13 +24,14 @@ export async function routeRepoForSession(
   issue: LinearIssueContext,
   prompt: string,
   sessionId: string,
+  tokenStore?: LinearTokenStore,
 ): Promise<RepoMapping> {
   const explicit = findExplicitRepo(config.repos, prompt);
   if (explicit) {
     return explicit;
   }
 
-  const suggested = await findSuggestedRepo(config, issue, sessionId);
+  const suggested = await findSuggestedRepo(config, issue, sessionId, tokenStore);
   if (suggested) {
     return suggested;
   }
@@ -47,11 +48,12 @@ async function findSuggestedRepo(
   config: BridgeConfig,
   issue: LinearIssueContext,
   sessionId: string,
+  tokenStore?: LinearTokenStore,
 ): Promise<RepoMapping | undefined> {
   const minimumConfidence = config.linear.repositorySuggestionMinConfidence ?? 0.2;
 
   try {
-    const suggestions = await suggestLinearRepositories(config, issue.id, sessionId);
+    const suggestions = await suggestLinearRepositories(config, issue.id, sessionId, tokenStore);
     const best = suggestions
       .filter((suggestion) => suggestion.confidence >= minimumConfidence)
       .sort((left, right) => right.confidence - left.confidence)[0];

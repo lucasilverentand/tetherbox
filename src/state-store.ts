@@ -43,6 +43,36 @@ interface SessionThreadRow {
   codex_thread_id: string | null;
 }
 
+export interface LinearInstallationRecord {
+  workspaceId: string;
+  appUserId?: string;
+  accessToken: string;
+  refreshToken?: string;
+  tokenType: string;
+  scope: string;
+  expiresAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface LinearInstallationRow {
+  workspace_id: string;
+  app_user_id: string | null;
+  access_token: string;
+  refresh_token: string | null;
+  token_type: string;
+  scope: string;
+  expires_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface OAuthStateRow {
+  state: string;
+  redirect_uri: string;
+  expires_at: string;
+}
+
 export interface JobUpdateOptions {
   retryEligible?: boolean;
   incrementRetryCount?: boolean;
@@ -280,6 +310,74 @@ export class StateStore {
     }
   }
 
+  createLinearOAuthState(state: string, redirectUri: string, expiresAt: string): void {
+    const now = new Date().toISOString();
+    this.requireDb()
+      .query(
+        `insert into linear_oauth_states (state, redirect_uri, expires_at, created_at)
+         values (?, ?, ?, ?)`,
+      )
+      .run(state, redirectUri, expiresAt, now);
+  }
+
+  consumeLinearOAuthState(state: string, now = new Date()): { redirectUri: string } | undefined {
+    const db = this.requireDb();
+    const row = db
+      .query("select state, redirect_uri, expires_at from linear_oauth_states where state = ?")
+      .get(state) as OAuthStateRow | null;
+    db.query("delete from linear_oauth_states where state = ?").run(state);
+
+    if (!row || Date.parse(row.expires_at) <= now.getTime()) {
+      return undefined;
+    }
+
+    return { redirectUri: row.redirect_uri };
+  }
+
+  saveLinearInstallation(record: {
+    workspaceId: string;
+    appUserId?: string;
+    accessToken: string;
+    refreshToken?: string;
+    tokenType?: string;
+    scope?: string;
+    expiresAt?: string;
+  }): void {
+    const now = new Date().toISOString();
+    this.requireDb()
+      .query(
+        `insert into workspace_installations (
+          workspace_id, app_user_id, access_token, refresh_token, token_type, scope, expires_at, created_at, updated_at
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        on conflict(workspace_id) do update set
+          app_user_id = excluded.app_user_id,
+          access_token = excluded.access_token,
+          refresh_token = excluded.refresh_token,
+          token_type = excluded.token_type,
+          scope = excluded.scope,
+          expires_at = excluded.expires_at,
+          updated_at = excluded.updated_at`,
+      )
+      .run(
+        record.workspaceId,
+        record.appUserId ?? null,
+        record.accessToken,
+        record.refreshToken ?? null,
+        record.tokenType ?? "Bearer",
+        record.scope ?? "",
+        record.expiresAt ?? null,
+        now,
+        now,
+      );
+  }
+
+  getLinearInstallation(workspaceId = "default"): LinearInstallationRecord | undefined {
+    const row = this.requireDb()
+      .query("select * from workspace_installations where workspace_id = ?")
+      .get(workspaceId) as LinearInstallationRow | null;
+    return row ? linearInstallationFromRow(row) : undefined;
+  }
+
   async addEvent(level: DaemonEvent["level"], message: string, jobId?: string): Promise<void> {
     this.insertEvent(level, message, jobId, new Date().toISOString());
   }
@@ -301,6 +399,25 @@ export class StateStore {
         test_commands_json text not null,
         created_at text not null,
         updated_at text not null
+      );
+
+      create table if not exists workspace_installations (
+        workspace_id text primary key,
+        app_user_id text,
+        access_token text not null,
+        refresh_token text,
+        token_type text not null,
+        scope text not null,
+        expires_at text,
+        created_at text not null,
+        updated_at text not null
+      );
+
+      create table if not exists linear_oauth_states (
+        state text primary key,
+        redirect_uri text not null,
+        expires_at text not null,
+        created_at text not null
       );
 
       create table if not exists sessions (
@@ -441,5 +558,19 @@ function eventFromRow(row: EventRow): DaemonEvent {
     level: row.level,
     message: row.message,
     createdAt: row.created_at,
+  };
+}
+
+function linearInstallationFromRow(row: LinearInstallationRow): LinearInstallationRecord {
+  return {
+    workspaceId: row.workspace_id,
+    appUserId: row.app_user_id ?? undefined,
+    accessToken: row.access_token,
+    refreshToken: row.refresh_token ?? undefined,
+    tokenType: row.token_type,
+    scope: row.scope,
+    expiresAt: row.expires_at ?? undefined,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
   };
 }

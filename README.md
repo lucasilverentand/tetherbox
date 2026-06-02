@@ -97,6 +97,14 @@ Set `LINEAR_API_KEY` (or the env var named by `linear.apiKeyEnv`) to the app act
 When a webhook includes an issue ID, Tetherbox asks Linear's repository suggestion API to rank the configured candidate repos using the issue, session, guidance, and Linear context. Explicit repo mentions still win; low-confidence or unavailable suggestions fall back to the static team mapping. Tune the threshold with `linear.repositorySuggestionMinConfidence`.
 Follow-up `prompted` Agent Session events reuse the Codex thread ID stored for that Linear session, so user replies continue the same local Codex conversation.
 
+For OAuth app installation, set `LINEAR_CLIENT_ID` and `LINEAR_CLIENT_SECRET` using the env var names configured by `linear.oauthClientIdEnv` and `linear.oauthClientSecretEnv`, then open:
+
+```text
+https://your-public-host.example.com/oauth/linear/start
+```
+
+Tetherbox redirects to Linear with `actor=app`, validates the callback state, exchanges the authorization code, stores the app actor token in SQLite, and refreshes stored tokens before GraphQL calls when needed.
+
 ## Design
 
 See [docs/design.md](docs/design.md).

@@ -1,6 +1,11 @@
 import { createHmac } from "node:crypto";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 import {
+  buildLinearOAuthAuthorizationUrl,
+  completeLinearOAuthCallback,
   getIssueContext,
   getPrompt,
   getSessionId,
@@ -10,6 +15,7 @@ import {
   updateLinearAgentSession,
   verifyLinearSignature,
 } from "../src/linear";
+import { StateStore } from "../src/state-store";
 import type { BridgeConfig } from "../src/types";
 
 describe("Linear webhook handling", () => {
@@ -131,6 +137,110 @@ describe("Linear webhook handling", () => {
     expect(statusExternalUrl(config, "job/1")?.url).toBe("https://bridge.example/api/status#job%2F1");
     expect(statusExternalUrl({ ...config, server: { host: "127.0.0.1", port: 8787 } }, "job/1")).toBeUndefined();
   });
+
+  test("builds Linear OAuth app actor authorization URLs", async () => {
+    process.env.LINEAR_CLIENT_ID = "client-1";
+    const store = await loadedState();
+
+    try {
+      const url = buildLinearOAuthAuthorizationUrl(oauthConfig, store, "state-1");
+
+      expect(url.origin + url.pathname).toBe("https://linear.app/oauth/authorize");
+      expect(url.searchParams.get("actor")).toBe("app");
+      expect(url.searchParams.get("client_id")).toBe("client-1");
+      expect(url.searchParams.get("redirect_uri")).toBe("https://bridge.example/oauth/linear/callback");
+      expect(url.searchParams.get("scope")).toContain("app:assignable");
+      expect(store.consumeLinearOAuthState("state-1")).toBeDefined();
+    } finally {
+      store.close();
+      delete process.env.LINEAR_CLIENT_ID;
+    }
+  });
+
+  test("exchanges Linear OAuth callbacks and stores app actor tokens", async () => {
+    process.env.LINEAR_CLIENT_ID = "client-1";
+    process.env.LINEAR_CLIENT_SECRET = "secret-1";
+    const calls: unknown[] = [];
+    const restore = mockFetchSequence(calls, [
+      new Response(
+        JSON.stringify({
+          access_token: "access-1",
+          refresh_token: "refresh-1",
+          token_type: "Bearer",
+          expires_in: 3600,
+          scope: "read write",
+        }),
+        { status: 200 },
+      ),
+      new Response(JSON.stringify({ data: { viewer: { id: "app-user-1" } } }), { status: 200 }),
+    ]);
+    const store = await loadedState();
+    store.createLinearOAuthState("state-1", "https://bridge.example/oauth/linear/callback", futureDate());
+
+    try {
+      const installation = await completeLinearOAuthCallback(
+        oauthConfig,
+        store,
+        new URLSearchParams({ code: "code-1", state: "state-1" }),
+      );
+
+      expect(installation).toMatchObject({
+        workspaceId: "default",
+        appUserId: "app-user-1",
+        accessToken: "access-1",
+        refreshToken: "refresh-1",
+      });
+      expect(calls[0]).toMatchObject({
+        body: "grant_type=authorization_code&code=code-1&redirect_uri=https%3A%2F%2Fbridge.example%2Foauth%2Flinear%2Fcallback&client_id=client-1&client_secret=secret-1",
+      });
+    } finally {
+      restore();
+      store.close();
+      delete process.env.LINEAR_CLIENT_ID;
+      delete process.env.LINEAR_CLIENT_SECRET;
+    }
+  });
+
+  test("refreshes stored Linear tokens before GraphQL calls", async () => {
+    process.env.LINEAR_CLIENT_ID = "client-1";
+    process.env.LINEAR_CLIENT_SECRET = "secret-1";
+    delete process.env.LINEAR_API_KEY;
+    const calls: unknown[] = [];
+    const restore = mockFetchSequence(calls, [
+      new Response(
+        JSON.stringify({
+          access_token: "access-2",
+          refresh_token: "refresh-2",
+          token_type: "Bearer",
+          expires_in: 3600,
+          scope: "read write",
+        }),
+        { status: 200 },
+      ),
+      new Response(JSON.stringify({ data: { agentActivityCreate: { success: true } } }), { status: 200 }),
+    ]);
+    const store = await loadedState();
+    store.saveLinearInstallation({
+      workspaceId: "default",
+      accessToken: "access-1",
+      refreshToken: "refresh-1",
+      tokenType: "Bearer",
+      scope: "read write",
+      expiresAt: "2020-01-01T00:00:00.000Z",
+    });
+
+    try {
+      await postLinearActivity(oauthConfig, "sess_1", { type: "thought", body: "Working" }, store);
+      expect(calls[0]).toMatchObject({ body: "grant_type=refresh_token&refresh_token=refresh-1&client_id=client-1&client_secret=secret-1" });
+      expect(calls[1]).toMatchObject({ headers: { Authorization: "Bearer access-2" } });
+      expect(store.getLinearInstallation("default")?.refreshToken).toBe("refresh-2");
+    } finally {
+      restore();
+      store.close();
+      delete process.env.LINEAR_CLIENT_ID;
+      delete process.env.LINEAR_CLIENT_SECRET;
+    }
+  });
 });
 
 const config: BridgeConfig = {
@@ -139,6 +249,15 @@ const config: BridgeConfig = {
   codex: { bin: "codex", sandbox: "workspace-write" },
   repos: [],
   policies: [],
+};
+
+const oauthConfig: BridgeConfig = {
+  ...config,
+  linear: {
+    ...config.linear,
+    oauthClientIdEnv: "LINEAR_CLIENT_ID",
+    oauthClientSecretEnv: "LINEAR_CLIENT_SECRET",
+  },
 };
 
 function mockFetch(calls: unknown[]): () => void {
@@ -157,4 +276,34 @@ function mockFetch(calls: unknown[]): () => void {
   return () => {
     globalThis.fetch = original;
   };
+}
+
+function mockFetchSequence(calls: unknown[], responses: Response[]): () => void {
+  const original = globalThis.fetch;
+  globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+    calls.push({
+      headers: init?.headers,
+      body: init?.body instanceof URLSearchParams ? init.body.toString() : JSON.parse(String(init?.body)),
+    });
+    const response = responses.shift();
+    if (!response) {
+      throw new Error("No mocked response");
+    }
+    return response;
+  }) as typeof fetch;
+
+  return () => {
+    globalThis.fetch = original;
+  };
+}
+
+async function loadedState(): Promise<StateStore> {
+  const dir = await mkdtemp(join(tmpdir(), "linear-oauth-"));
+  const store = new StateStore(join(dir, "daemon.sqlite"));
+  await store.load();
+  return store;
+}
+
+function futureDate(): string {
+  return new Date(Date.now() + 60_000).toISOString();
 }

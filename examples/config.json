@@ -15,7 +15,10 @@
   "linear": {
     "webhookSecretEnv": "LINEAR_WEBHOOK_SECRET",
     "apiKeyEnv": "LINEAR_API_KEY",
-    "repositorySuggestionMinConfidence": 0.2
+    "repositorySuggestionMinConfidence": 0.2,
+    "oauthClientIdEnv": "LINEAR_CLIENT_ID",
+    "oauthClientSecretEnv": "LINEAR_CLIENT_SECRET",
+    "oauthScopes": ["read", "write", "app:assignable", "app:mentionable"]
   },
   "codex": {
     "bin": "codex",
