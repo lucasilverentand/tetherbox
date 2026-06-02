@@ -149,9 +149,14 @@ export function parseLinearAgentEvent(rawBody: string): LinearAgentSessionEvent 
 
 export function getIssueContext(event: LinearAgentSessionEvent): LinearIssueContext {
   const issue = event.agentSession?.issue ?? event.issue;
+  const team = recordValue((issue as { team?: unknown } | undefined)?.team);
+  const teamId = firstText(issue?.teamId, team ? stringField(team, "id") : undefined);
+  const teamKey = firstText(issue?.teamKey, team ? stringField(team, "key") : undefined);
   return {
     labels: [],
     ...issue,
+    ...(teamId ? { teamId } : {}),
+    ...(teamKey ? { teamKey } : {}),
     labels: issue?.labels ?? [],
   };
 }
@@ -292,6 +297,7 @@ export function buildLinearJobPrompt(
     issue.identifier || issue.title ? `- Issue: ${[issue.identifier, issue.title].filter(Boolean).join(": ")}` : undefined,
     issue.url ? `- URL: ${issue.url}` : undefined,
     issue.teamKey ? `- Team: ${issue.teamKey}` : undefined,
+    issue.teamId && !issue.teamKey ? `- Team ID: ${issue.teamId}` : undefined,
     issue.labels.length ? `- Labels: ${issue.labels.join(", ")}` : undefined,
     issue.description ? ["", "### Description", issue.description].join("\n") : undefined,
     formatWorkspaceContext(issue),

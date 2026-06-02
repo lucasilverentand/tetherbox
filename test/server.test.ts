@@ -390,6 +390,7 @@ describe("server webhook handling", () => {
         accepted: true,
         eventType: "PermissionChange",
         action: "teamAccessChanged",
+        canceledJobIds: [],
       });
       expect(queue.jobs).toHaveLength(0);
       expect(state.snapshot().jobs).toHaveLength(0);
@@ -399,6 +400,74 @@ describe("server webhook handling", () => {
         message: expect.stringContaining("added teams: team-added"),
       });
       expect(state.snapshot().events[0]?.message).toContain("removed teams: team-removed");
+    } finally {
+      state.close();
+    }
+  });
+
+  test("cancels active jobs when Linear removes app access to their issue team", async () => {
+    const state = await loadedState();
+    const queue = new FakeQueue(state);
+    const queuedJob = jobFixture({
+      id: "job-queued",
+      sessionId: "sess_queued",
+      issue: { id: "issue-1", identifier: "OSS-272", title: "Cancel on permission loss", teamId: "team-removed", labels: [] },
+    });
+    await state.createJob(queuedJob);
+    queue.jobs.push(queuedJob);
+    await state.createJob(jobFixture({
+      id: "job-waiting",
+      sessionId: "sess_waiting",
+      issue: { id: "issue-2", identifier: "OSS-273", title: "Waiting affected job", teamId: "team-removed", labels: [] },
+    }));
+    await state.updateJob("job-waiting", "waiting_approval", "Approval required");
+    state.createApproval("job-waiting", "Run local Codex");
+    await state.createJob(jobFixture({
+      id: "job-running",
+      sessionId: "sess_running",
+      issue: { id: "issue-3", identifier: "OSS-274", title: "Running affected job", teamId: "team-removed", labels: [] },
+    }));
+    await state.updateJob("job-running", "running", "Job started");
+    const unaffectedJob = jobFixture({
+      id: "job-unaffected",
+      sessionId: "sess_unaffected",
+      issue: { id: "issue-4", identifier: "OSS-275", title: "Unchanged team", teamId: "team-kept", labels: [] },
+    });
+    await state.createJob(unaffectedJob);
+    queue.jobs.push(unaffectedJob);
+    const handler = createRequestHandler({
+      config,
+      state,
+      queue,
+      webhookSecret: "secret",
+    });
+    const body = linearBody({
+      type: "PermissionChange",
+      action: "teamAccessChanged",
+      appUserId: "app-user-1",
+      canAccessAllPublicTeams: false,
+      removedTeamIds: ["team-removed"],
+    });
+
+    try {
+      const response = await handler(
+        new Request("http://127.0.0.1:8787/webhooks/linear", {
+          method: "POST",
+          headers: { "Linear-Signature": signature(body, "secret") },
+          body,
+        }),
+      );
+
+      expect(response.status).toBe(200);
+      const payload = await response.json() as { canceledJobIds: string[] };
+      expect(new Set(payload.canceledJobIds)).toEqual(new Set(["job-queued", "job-waiting", "job-running"]));
+      expect(queue.jobs.map((job) => job.id)).toEqual(["job-unaffected"]);
+      expect(state.getJob("job-queued")?.status).toBe("canceled");
+      expect(state.getJob("job-waiting")?.status).toBe("canceled");
+      expect(state.getJob("job-running")?.status).toBe("canceled");
+      expect(state.getJob("job-unaffected")?.status).toBe("queued");
+      expect(state.getPendingApprovalForJob("job-waiting")).toBeUndefined();
+      expect(state.snapshot().events.some((event) => event.message.includes("removed app access"))).toBe(true);
     } finally {
       state.close();
     }
@@ -439,6 +508,7 @@ describe("server webhook handling", () => {
         accepted: true,
         eventType: "OAuthApp",
         action: "revoked",
+        canceledJobIds: [],
       });
       expect(queue.jobs).toHaveLength(0);
       expect(state.getLinearInstallation("default")).toBeUndefined();

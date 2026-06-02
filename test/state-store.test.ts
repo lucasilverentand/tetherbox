@@ -228,6 +228,32 @@ describe("StateStore", () => {
     expect(byIdentifier.map((job) => job.id)).toEqual(["job-1"]);
   });
 
+  test("lists active jobs for Linear team IDs", async () => {
+    const path = await statePath();
+    const store = new StateStore(path);
+    await store.load();
+    await store.createJob({ ...jobFixture(), issue: { ...jobFixture().issue, teamId: "team-1" } });
+    await store.createJob({
+      ...jobFixture(),
+      id: "job-2",
+      sessionId: "session-2",
+      issue: { ...jobFixture().issue, teamId: "team-2" },
+    });
+    await store.updateJob("job-2", "running", "Started");
+    await store.createJob({
+      ...jobFixture(),
+      id: "job-3",
+      sessionId: "session-3",
+      issue: { ...jobFixture().issue, teamId: "team-1" },
+    });
+    await store.updateJob("job-3", "completed", "Done");
+
+    const matches = store.listActiveJobsForTeamIds(["team-1", "team-2", "team-1"]);
+    store.close();
+
+    expect(matches.map((job) => job.id).sort()).toEqual(["job-1", "job-2"]);
+  });
+
   test("creates and resolves pending approvals", async () => {
     const path = await statePath();
     const store = new StateStore(path);

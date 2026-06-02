@@ -171,12 +171,13 @@ export function createRequestHandler(options: RequestHandlerOptions): (request: 
         if (deliveryId && !state.claimWebhookDelivery(deliveryId)) {
           return duplicateLinearWebhookResponse(state, deliveryId);
         }
-        await handleLinearManagementWebhook(state, managementWebhook);
+        const canceledJobIds = await handleLinearManagementWebhook(state, queue, managementWebhook);
         return Response.json({
           ok: true,
           accepted: true,
           eventType: managementWebhook.type,
           action: managementWebhook.action,
+          canceledJobIds,
         });
       }
 
@@ -288,15 +289,26 @@ function firstNonEmptyString(...values: unknown[]): string | undefined {
 
 async function handleLinearManagementWebhook(
   state: StateStore,
+  queue: Pick<JobQueue, "cancel">,
   event: NonNullable<ReturnType<typeof getLinearManagementWebhook>>,
-): Promise<void> {
+): Promise<string[]> {
   if (event.type === "OAuthApp" && event.action === "revoked") {
     state.deleteLinearInstallation();
     await state.addEvent("warn", formatLinearManagementWebhookEvent(event), undefined, "linear");
-    return;
+    return [];
   }
 
   await state.addEvent("info", formatLinearManagementWebhookEvent(event), undefined, "linear");
+  if (!event.removedTeamIds.length) {
+    return [];
+  }
+
+  return cancelActiveJobsForLinearTeamIds(state, queue, event.removedTeamIds, {
+    approvalResolution: "Linear team access removed",
+    jobMessage: "Canceled because Linear removed app access to the issue team",
+    failureReason: "Linear app access removed for issue team",
+    eventMessage: "Canceled job because Linear removed app access to the issue team",
+  });
 }
 
 async function handleLinearInboxNotificationWebhook(
@@ -376,10 +388,41 @@ async function cancelActiveJobsForLinearIssue(
     jobMessage: string;
     failureReason: string;
     eventMessage: string;
-    noMatchMessage: string;
+    noMatchMessage?: string;
   },
 ): Promise<string[]> {
   const activeJobs = state.listActiveJobsForIssue(issue);
+  return cancelActiveLinearJobs(state, queue, activeJobs, messages);
+}
+
+async function cancelActiveJobsForLinearTeamIds(
+  state: StateStore,
+  queue: Pick<JobQueue, "cancel">,
+  teamIds: readonly string[],
+  messages: {
+    approvalResolution: string;
+    jobMessage: string;
+    failureReason: string;
+    eventMessage: string;
+    noMatchMessage?: string;
+  },
+): Promise<string[]> {
+  const activeJobs = state.listActiveJobsForTeamIds(teamIds);
+  return cancelActiveLinearJobs(state, queue, activeJobs, messages);
+}
+
+async function cancelActiveLinearJobs(
+  state: StateStore,
+  queue: Pick<JobQueue, "cancel">,
+  activeJobs: JobRecord[],
+  messages: {
+    approvalResolution: string;
+    jobMessage: string;
+    failureReason: string;
+    eventMessage: string;
+    noMatchMessage?: string;
+  },
+): Promise<string[]> {
   const canceledJobIds: string[] = [];
   for (const job of activeJobs) {
     const pendingApproval = state.getPendingApprovalForJob(job.id);
@@ -396,7 +439,7 @@ async function cancelActiveJobsForLinearIssue(
     canceledJobIds.push(job.id);
   }
 
-  if (!canceledJobIds.length) {
+  if (!canceledJobIds.length && messages.noMatchMessage) {
     await state.addEvent("warn", messages.noMatchMessage, undefined, "linear");
   }
   return canceledJobIds;

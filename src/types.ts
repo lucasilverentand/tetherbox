@@ -70,6 +70,7 @@ export interface LinearIssueContext {
   identifier?: string;
   title?: string;
   description?: string;
+  teamId?: string;
   teamKey?: string;
   labels: string[];
   priority?: number | { value?: number; name?: string };

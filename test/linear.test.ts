@@ -51,7 +51,7 @@ describe("Linear webhook handling", () => {
           issue: {
             identifier: "ENG-123",
             title: "Fix checkout",
-            teamKey: "ENG",
+            team: { id: "team-1", key: "ENG" },
             labels: ["docs"],
           },
         },
@@ -60,7 +60,7 @@ describe("Linear webhook handling", () => {
 
     expect(getSessionId(event)).toBe("sess_1");
     expect(getPrompt(event)).toContain("Fix this");
-    expect(getIssueContext(event).labels).toEqual(["docs"]);
+    expect(getIssueContext(event)).toMatchObject({ labels: ["docs"], teamId: "team-1", teamKey: "ENG" });
   });
 
   test("recognizes supported Agent Session webhook actions", () => {
