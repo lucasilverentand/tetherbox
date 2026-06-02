@@ -330,7 +330,7 @@ export async function postLinearActivity(
     return;
   }
 
-  await linearGraphql(token, {
+  await linearGraphql(token, config.linear.apiTimeoutMs, {
     query: `mutation AgentActivityCreate($input: AgentActivityCreateInput!) {
       agentActivityCreate(input: $input) {
         success
@@ -363,7 +363,7 @@ export async function updateLinearAgentSession(
     return;
   }
 
-  await linearGraphql(token, {
+  await linearGraphql(token, config.linear.apiTimeoutMs, {
     query: `mutation AgentSessionUpdate($id: String!, $input: AgentSessionUpdateInput!) {
       agentSessionUpdate(id: $id, input: $input) {
         success
@@ -392,7 +392,7 @@ export async function suggestLinearRepositories(
     issueRepositorySuggestions?: {
       suggestions?: LinearRepositorySuggestion[];
     };
-  }>(token, {
+  }>(token, config.linear.apiTimeoutMs, {
     query: `query IssueRepositorySuggestions(
       $issueId: String!
       $agentSessionId: String!
@@ -446,7 +446,7 @@ export async function listLinearAgentSessionActivities(
         }>;
       };
     };
-  }>(token, {
+  }>(token, config.linear.apiTimeoutMs, {
     query: `query TetherboxAgentSessionActivities($id: String!, $first: Int!) {
       agentSession(id: $id) {
         activities(first: $first) {
@@ -509,7 +509,7 @@ export async function syncLinearIssueForAgentSession(
     return { issueId, skippedReason: "missing_token" };
   }
 
-  const current = await fetchLinearIssueForLifecycle(token, issueId);
+  const current = await fetchLinearIssueForLifecycle(token, config.linear.apiTimeoutMs, issueId);
   if (!current) {
     return { issueId, skippedReason: "missing_issue" };
   }
@@ -521,7 +521,7 @@ export async function syncLinearIssueForAgentSession(
     if (!current.team?.id) {
       return { ...result, skippedReason: "missing_team" };
     }
-    const startedState = await fetchFirstStartedState(token, current.team.id);
+    const startedState = await fetchFirstStartedState(token, config.linear.apiTimeoutMs, current.team.id);
     if (!startedState) {
       return { ...result, skippedReason: "no_started_state" };
     }
@@ -539,7 +539,7 @@ export async function syncLinearIssueForAgentSession(
     return { ...result, skippedReason: "already_current" };
   }
 
-  await updateLinearIssue(token, current.id, update);
+  await updateLinearIssue(token, config.linear.apiTimeoutMs, current.id, update);
   return result;
 }
 
@@ -559,7 +559,7 @@ export async function moveLinearIssueToReviewState(
     return { issueId, skippedReason: "missing_token" };
   }
 
-  const current = await fetchLinearIssueForLifecycle(token, issueId);
+  const current = await fetchLinearIssueForLifecycle(token, config.linear.apiTimeoutMs, issueId);
   if (!current) {
     return { issueId, skippedReason: "missing_issue" };
   }
@@ -573,12 +573,12 @@ export async function moveLinearIssueToReviewState(
     return { ...result, skippedReason: "missing_team" };
   }
 
-  const targetState = await fetchTeamStateByName(token, current.team.id, targetStateName);
+  const targetState = await fetchTeamStateByName(token, config.linear.apiTimeoutMs, current.team.id, targetStateName);
   if (!targetState) {
     return { ...result, skippedReason: "missing_review_state" };
   }
 
-  await updateLinearIssue(token, current.id, { stateId: targetState.id });
+  await updateLinearIssue(token, config.linear.apiTimeoutMs, current.id, { stateId: targetState.id });
   return { ...result, movedToState: targetState.name };
 }
 
@@ -624,7 +624,7 @@ export async function completeLinearOAuthCallback(
     code,
     redirect_uri: oauthState.redirectUri,
   });
-  const viewer = await fetchLinearViewer(token.access_token);
+  const viewer = await fetchLinearViewer(config, token.access_token);
   const installation = {
     workspaceId: "default",
     appUserId: viewer.id,
@@ -687,16 +687,33 @@ async function getLinearAccessToken(config: BridgeConfig, tokenStore?: LinearTok
 
 async function linearGraphql<T>(
   token: string,
+  timeoutMs: number | undefined,
   body: { query: string; variables: Record<string, unknown> },
 ): Promise<T> {
-  const response = await fetch(LINEAR_GRAPHQL_URL, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
+  const effectiveTimeoutMs = timeoutMs ?? 8_000;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => {
+    controller.abort();
+  }, effectiveTimeoutMs);
+  let response: Response;
+  try {
+    response = await fetch(LINEAR_GRAPHQL_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error(`Linear GraphQL request timed out after ${effectiveTimeoutMs}ms`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 
   if (!response.ok) {
     throw new Error(`Linear GraphQL returned HTTP ${response.status}: ${await response.text()}`);
@@ -715,6 +732,7 @@ async function linearGraphql<T>(
 
 async function fetchLinearIssueForLifecycle(
   token: string,
+  timeoutMs: number | undefined,
   issueId: string,
 ): Promise<
   | {
@@ -734,7 +752,7 @@ async function fetchLinearIssueForLifecycle(
       team?: { id: string };
       delegate?: { id: string } | null;
     };
-  }>(token, {
+  }>(token, timeoutMs, {
     query: `query TetherboxIssueLifecycle($id: String!) {
       issue(id: $id) {
         id
@@ -759,6 +777,7 @@ async function fetchLinearIssueForLifecycle(
 
 async function fetchFirstStartedState(
   token: string,
+  timeoutMs: number | undefined,
   teamId: string,
 ): Promise<{ id: string; name: string; position: number } | undefined> {
   const data = await linearGraphql<{
@@ -767,7 +786,7 @@ async function fetchFirstStartedState(
         nodes?: Array<{ id: string; name: string; position: number }>;
       };
     };
-  }>(token, {
+  }>(token, timeoutMs, {
     query: `query TetherboxTeamStartedStatuses($teamId: String!) {
       team(id: $teamId) {
         states(filter: { type: { eq: "started" } }) {
@@ -787,6 +806,7 @@ async function fetchFirstStartedState(
 
 async function fetchTeamStateByName(
   token: string,
+  timeoutMs: number | undefined,
   teamId: string,
   stateName: string,
 ): Promise<{ id: string; name: string; position: number } | undefined> {
@@ -796,7 +816,7 @@ async function fetchTeamStateByName(
         nodes?: Array<{ id: string; name: string; position: number }>;
       };
     };
-  }>(token, {
+  }>(token, timeoutMs, {
     query: `query TetherboxTeamStates($teamId: String!) {
       team(id: $teamId) {
         states {
@@ -818,10 +838,11 @@ async function fetchTeamStateByName(
 
 async function updateLinearIssue(
   token: string,
+  timeoutMs: number | undefined,
   issueId: string,
   input: { stateId?: string; delegateId?: string },
 ): Promise<void> {
-  await linearGraphql(token, {
+  await linearGraphql(token, timeoutMs, {
     query: `mutation TetherboxIssueUpdate($id: String!, $input: IssueUpdateInput!) {
       issueUpdate(id: $id, input: $input) {
         success
@@ -1107,8 +1128,8 @@ async function exchangeLinearOAuthToken(
   };
 }
 
-async function fetchLinearViewer(accessToken: string): Promise<{ id?: string }> {
-  const data = await linearGraphql<{ viewer?: { id?: string } }>(accessToken, {
+async function fetchLinearViewer(config: BridgeConfig, accessToken: string): Promise<{ id?: string }> {
+  const data = await linearGraphql<{ viewer?: { id?: string } }>(accessToken, config.linear.apiTimeoutMs, {
     query: `query Viewer { viewer { id } }`,
     variables: {},
   });
