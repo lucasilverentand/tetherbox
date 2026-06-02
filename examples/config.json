@@ -4,7 +4,8 @@
     "port": 8787
   },
   "state": {
-    "path": "state/daemon.json"
+    "path": "state/daemon.json",
+    "worktreeRetentionDays": 7
   },
   "linear": {
     "webhookSecretEnv": "LINEAR_WEBHOOK_SECRET",

@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { dirname } from "node:path";
 import type { DaemonEvent, DaemonState, JobRecord, JobStatus, RoutedJob } from "./types";
+import type { WorktreeInfo } from "./worktree-manager";
 
 export class StateStore {
   private state: DaemonState = {
@@ -60,6 +61,19 @@ export class StateStore {
     job.lastMessage = lastMessage;
     job.updatedAt = new Date().toISOString();
     await this.addEvent(status === "failed" ? "error" : "info", lastMessage, id, false);
+    await this.save();
+  }
+
+  async setJobWorktree(id: string, worktree: WorktreeInfo): Promise<void> {
+    const job = this.state.jobs.find((record) => record.id === id);
+    if (!job) {
+      return;
+    }
+
+    job.branchName = worktree.branchName;
+    job.worktreePath = worktree.path;
+    job.updatedAt = new Date().toISOString();
+    await this.addEvent("info", `Prepared worktree ${worktree.branchName}`, id, false);
     await this.save();
   }
 

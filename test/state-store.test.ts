@@ -44,4 +44,42 @@ describe("StateStore", () => {
     expect(snapshot.jobs[0]?.status).toBe("running");
     expect(snapshot.events.length).toBe(2);
   });
+
+  test("persists job worktree details", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "bridge-state-"));
+    const store = new StateStore(join(dir, "state.json"));
+    await store.load();
+
+    const job: RoutedJob = {
+      id: "job-1",
+      sessionId: "session-1",
+      prompt: "Fix it",
+      issue: {
+        identifier: "ENG-1",
+        title: "Fix it",
+        labels: ["docs"],
+      },
+      repo: {
+        linearTeams: ["ENG"],
+        github: "lucasilverentand/example",
+        localPath: "/tmp/example",
+        defaultBase: "main",
+      },
+      policy: {
+        ruleName: "docs-auto",
+        decision: "allow_auto",
+        sandbox: "workspace-write",
+      },
+    };
+
+    await store.createJob(job);
+    await store.setJobWorktree("job-1", {
+      branchName: "eng-1-fix-it",
+      path: join(dir, "worktrees", "job-1"),
+    });
+
+    const snapshot = store.snapshot();
+    expect(snapshot.jobs[0]?.branchName).toBe("eng-1-fix-it");
+    expect(snapshot.jobs[0]?.worktreePath).toEndWith(join("worktrees", "job-1"));
+  });
 });
