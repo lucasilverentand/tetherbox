@@ -37,13 +37,15 @@ describe("pull request automation", () => {
       { stdout: "", stderr: "" },
       { stdout: "https://github.com/lucasilverentand/example/pull/42\n", stderr: "" },
     ]);
+    runner.existingFiles.add("/tmp/codex_signing_key");
 
-    const result = await finalizeSuccessfulRun(config, job, worktree, runner);
+    const result = await finalizeSuccessfulRun(signedConfig, job, worktree, runner);
 
     expect(result).toEqual({
       status: "created",
       url: "https://github.com/lucasilverentand/example/pull/42",
       number: 42,
+      warnings: [],
     });
     expect(runner.commands.map((command) => command.command)).toEqual([
       "bun test",
@@ -54,11 +56,67 @@ describe("pull request automation", () => {
       "gh",
     ]);
     const commit = runner.commands.find(
-      (command) => command.kind === "run" && command.command === "git" && command.args[0] === "commit",
+      (command) => command.kind === "run" && command.command === "git" && command.args.includes("commit"),
     );
     expect(commit).toMatchObject({
-      args: expect.arrayContaining(["commit", "-S", "-m", "Co-authored-by: Codex <codex@openai.com>"]),
+      args: expect.arrayContaining([
+        "-c",
+        "gpg.format=ssh",
+        "user.signingKey=/tmp/codex_signing_key",
+        "commit",
+        "-S",
+        "-m",
+        "Co-authored-by: Codex <codex@openai.com>",
+      ]),
     });
+  });
+
+  test("creates an unsigned co-authored commit when the configured signing key is missing", async () => {
+    const runner = new FakeRunner([
+      { stdout: " M src/app.ts\n", stderr: "" },
+      { stdout: "", stderr: "" },
+      { stdout: "", stderr: "" },
+      { stdout: "", stderr: "" },
+      { stdout: "https://github.com/lucasilverentand/example/pull/42\n", stderr: "" },
+    ]);
+
+    const result = await finalizeSuccessfulRun(signedConfig, job, worktree, runner);
+    const commit = runner.commands.find(
+      (command) => command.kind === "run" && command.command === "git" && command.args[0] === "commit",
+    );
+
+    expect(result.warnings).toEqual([
+      "Git signing key not found at /tmp/codex_signing_key; created an unsigned commit.",
+    ]);
+    expect(commit?.kind).toBe("run");
+    if (!commit || commit.kind !== "run") {
+      throw new Error("Expected unsigned git commit command");
+    }
+    expect(commit.args).toContain("commit");
+    expect(commit.args).toContain("Co-authored-by: Codex <codex@openai.com>");
+    expect(commit.args).not.toContain("-S");
+  });
+
+  test("falls back to an unsigned commit when signing fails", async () => {
+    const runner = new FakeRunner([
+      { stdout: " M src/app.ts\n", stderr: "" },
+      { stdout: "", stderr: "" },
+      { stdout: "", stderr: "" },
+      { stdout: "", stderr: "" },
+      { stdout: "https://github.com/lucasilverentand/example/pull/42\n", stderr: "" },
+    ]);
+    runner.existingFiles.add("/tmp/codex_signing_key");
+    runner.failSignedCommit = true;
+
+    const result = await finalizeSuccessfulRun(signedConfig, job, worktree, runner);
+    const commits = runner.commands.filter(
+      (command) => command.kind === "run" && command.command === "git" && command.args.includes("commit"),
+    );
+
+    expect(result.warnings?.[0]).toContain("Signed commit failed; created an unsigned commit instead.");
+    expect(commits).toHaveLength(2);
+    expect(commits[0]?.kind === "run" ? commits[0].args.includes("-S") : false).toBe(true);
+    expect(commits[1]?.kind === "run" ? commits[1].args.includes("-S") : true).toBe(false);
   });
 
   test("parses pull request check output", () => {
@@ -104,6 +162,11 @@ const config: BridgeConfig = {
   policies: [],
 };
 
+const signedConfig: BridgeConfig = {
+  ...config,
+  git: { signingKeyPath: "/tmp/codex_signing_key" },
+};
+
 const job: RoutedJob = {
   id: "job-1",
   sessionId: "sess-1",
@@ -140,11 +203,17 @@ class FakeRunner implements CommandRunner {
   > = [];
   failShell = false;
   failRun?: string;
+  failSignedCommit = false;
+  existingFiles = new Set<string>();
 
   constructor(private readonly results: CommandResult[]) {}
 
   async run(command: string, args: string[], cwd: string): Promise<CommandResult> {
     this.commands.push({ kind: "run", command, args, cwd });
+    if (this.failSignedCommit && command === "git" && args.includes("commit") && args.includes("-S")) {
+      this.failSignedCommit = false;
+      throw new Error("signing failed");
+    }
     if (this.failRun) {
       throw new Error(this.failRun);
     }
@@ -157,6 +226,10 @@ class FakeRunner implements CommandRunner {
       throw new Error("validation failed");
     }
     return { stdout: "", stderr: "" };
+  }
+
+  async fileExists(path: string): Promise<boolean> {
+    return this.existingFiles.has(path);
   }
 
   private next(): CommandResult {

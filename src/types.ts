@@ -34,6 +34,9 @@ export interface BridgeConfig {
     appServerStartupTimeoutMs?: number;
     turnTimeoutMs?: number;
   };
+  git?: {
+    signingKeyPath?: string;
+  };
   repos: RepoMapping[];
   policies: PolicyRule[];
 }

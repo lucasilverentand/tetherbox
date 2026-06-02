@@ -29,6 +29,9 @@
     "appServerStartupTimeoutMs": 30000,
     "turnTimeoutMs": 1800000
   },
+  "git": {
+    "signingKeyPath": "~/.ssh/codex_signing_key"
+  },
   "repos": [
     {
       "linearTeams": ["ENG"],

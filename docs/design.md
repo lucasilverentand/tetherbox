@@ -221,7 +221,7 @@ Commit rules:
 
 - Sign commits when `~/.ssh/codex_signing_key` is configured.
 - Co-author commits with Codex.
-- Do not block the job solely because signing is unavailable.
+- Record a warning and continue with an unsigned co-authored commit when signing is unavailable.
 - Refuse to commit unrelated dirty changes in the source checkout.
 
 ### GitHub Integration

@@ -150,6 +150,20 @@ Supported decisions:
 
 `allow_plan_only` runs Codex in read-only mode and does not open a pull request. `require_approval` creates a pending approval and waits for a Linear reply. Pending approvals expire after `queue.approvalTimeoutMs`.
 
+## Git Commit Signing
+
+Tetherbox creates commits from the isolated job worktree after configured validation commands pass. Set `git.signingKeyPath` to an SSH signing key if the daemon should force a specific key:
+
+```json
+{
+  "git": {
+    "signingKeyPath": "~/.ssh/codex_signing_key"
+  }
+}
+```
+
+When the key exists, Tetherbox runs `git -c gpg.format=ssh -c user.signingKey=<path> commit -S ...` and includes `Co-authored-by: Codex <codex@openai.com>`. If the configured key is missing or signing fails, Tetherbox records a warning and creates an unsigned co-authored commit so the job can still open a pull request.
+
 ## Service Install
 
 Example service definitions live in `examples/`:

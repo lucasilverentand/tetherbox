@@ -1,4 +1,6 @@
 import { spawn } from "node:child_process";
+import { access } from "node:fs/promises";
+import { homedir } from "node:os";
 import type { BridgeConfig, RoutedJob } from "./types";
 import type { WorktreeInfo } from "./worktree-manager";
 
@@ -6,6 +8,7 @@ export interface PullRequestResult {
   status: "no_changes" | "created";
   url?: string;
   number?: number;
+  warnings?: string[];
 }
 
 export interface PullRequestCheckResult {
@@ -22,6 +25,7 @@ export interface CommandResult {
 export interface CommandRunner {
   run(command: string, args: string[], cwd: string): Promise<CommandResult>;
   runShell(command: string, cwd: string): Promise<CommandResult>;
+  fileExists?(path: string): Promise<boolean>;
 }
 
 export async function finalizeSuccessfulRun(
@@ -30,30 +34,19 @@ export async function finalizeSuccessfulRun(
   worktree: WorktreeInfo,
   runner: CommandRunner = new ProcessCommandRunner(),
 ): Promise<PullRequestResult> {
+  const warnings: string[] = [];
+
   for (const command of job.repo.testCommands ?? []) {
     await runner.runShell(command, worktree.path);
   }
 
   const status = await runner.run("git", ["status", "--porcelain"], worktree.path);
   if (!status.stdout.trim()) {
-    return { status: "no_changes" };
+    return { status: "no_changes", warnings };
   }
 
   await runner.run("git", ["add", "--all"], worktree.path);
-  await runner.run(
-    "git",
-    [
-      "commit",
-      "-S",
-      "-m",
-      commitTitle(job),
-      "-m",
-      commitBody(job),
-      "-m",
-      "Co-authored-by: Codex <codex@openai.com>",
-    ],
-    worktree.path,
-  );
+  await createCommit(config, job, worktree, runner, warnings);
   await runner.run("git", ["push", "-u", "origin", worktree.branchName], worktree.path);
   const created = await runner.run(
     "gh",
@@ -79,6 +72,7 @@ export async function finalizeSuccessfulRun(
     status: "created",
     url,
     number: url ? Number(url.match(/\/pull\/(\d+)/)?.[1]) || undefined : undefined,
+    warnings,
   };
 }
 
@@ -130,6 +124,88 @@ class ProcessCommandRunner implements CommandRunner {
   async runShell(command: string, cwd: string): Promise<CommandResult> {
     return runProcess(command, [], cwd, true);
   }
+
+  async fileExists(path: string): Promise<boolean> {
+    try {
+      await access(path);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
+
+async function createCommit(
+  config: BridgeConfig,
+  job: RoutedJob,
+  worktree: WorktreeInfo,
+  runner: CommandRunner,
+  warnings: string[],
+): Promise<void> {
+  const unsignedArgs = commitArgs(job);
+  const signingKeyPath = expandHome(config.git?.signingKeyPath);
+
+  if (!signingKeyPath) {
+    await runner.run("git", unsignedArgs, worktree.path);
+    return;
+  }
+
+  if (!(await fileExists(runner, signingKeyPath))) {
+    warnings.push(`Git signing key not found at ${signingKeyPath}; created an unsigned commit.`);
+    await runner.run("git", unsignedArgs, worktree.path);
+    return;
+  }
+
+  try {
+    await runner.run(
+      "git",
+      ["-c", "gpg.format=ssh", "-c", `user.signingKey=${signingKeyPath}`, ...commitArgs(job, true)],
+      worktree.path,
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    warnings.push(`Signed commit failed; created an unsigned commit instead. ${message}`);
+    await runner.run("git", unsignedArgs, worktree.path);
+  }
+}
+
+function commitArgs(job: RoutedJob, sign = false): string[] {
+  return [
+    "commit",
+    ...(sign ? ["-S"] : []),
+    "-m",
+    commitTitle(job),
+    "-m",
+    commitBody(job),
+    "-m",
+    "Co-authored-by: Codex <codex@openai.com>",
+  ];
+}
+
+async function fileExists(runner: CommandRunner, path: string): Promise<boolean> {
+  if (runner.fileExists) {
+    return runner.fileExists(path);
+  }
+
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function expandHome(path: string | undefined): string | undefined {
+  if (!path) {
+    return undefined;
+  }
+  if (path === "~") {
+    return homedir();
+  }
+  if (path.startsWith("~/")) {
+    return `${homedir()}${path.slice(1)}`;
+  }
+  return path;
 }
 
 function commitTitle(job: RoutedJob): string {
