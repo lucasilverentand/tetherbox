@@ -1,0 +1,79 @@
+export type PolicyDecision = "allow_auto" | "allow_plan_only" | "require_approval" | "deny";
+
+export type SandboxMode = "read-only" | "workspace-write" | "danger-full-access";
+
+export interface BridgeConfig {
+  server: {
+    host: string;
+    port: number;
+  };
+  linear: {
+    webhookSecretEnv: string;
+    apiKeyEnv?: string;
+  };
+  codex: {
+    bin: string;
+    model?: string;
+    sandbox: SandboxMode;
+  };
+  repos: RepoMapping[];
+  policies: PolicyRule[];
+}
+
+export interface RepoMapping {
+  linearTeams: string[];
+  github: string;
+  localPath: string;
+  defaultBase: string;
+  testCommands?: string[];
+}
+
+export interface PolicyRule {
+  name: string;
+  labels?: string[];
+  paths?: string[];
+  decision: PolicyDecision;
+  sandbox?: SandboxMode;
+}
+
+export interface LinearIssueContext {
+  id?: string;
+  identifier?: string;
+  title?: string;
+  description?: string;
+  teamKey?: string;
+  labels: string[];
+  url?: string;
+}
+
+export interface LinearAgentSessionEvent {
+  type?: string;
+  action?: string;
+  organizationId?: string;
+  agentSession?: {
+    id: string;
+    issue?: LinearIssueContext;
+    prompt?: string;
+  };
+  issue?: LinearIssueContext;
+  prompt?: string;
+}
+
+export interface RoutedJob {
+  sessionId: string;
+  prompt: string;
+  issue: LinearIssueContext;
+  repo: RepoMapping;
+  policy: AppliedPolicy;
+}
+
+export interface AppliedPolicy {
+  ruleName: string;
+  decision: PolicyDecision;
+  sandbox: SandboxMode;
+}
+
+export interface CodexNotification {
+  method?: string;
+  params?: Record<string, unknown>;
+}

@@ -1,0 +1,38 @@
+{
+  "server": {
+    "host": "127.0.0.1",
+    "port": 8787
+  },
+  "linear": {
+    "webhookSecretEnv": "LINEAR_WEBHOOK_SECRET",
+    "apiKeyEnv": "LINEAR_API_KEY"
+  },
+  "codex": {
+    "bin": "codex",
+    "model": "gpt-5.5",
+    "sandbox": "workspace-write"
+  },
+  "repos": [
+    {
+      "linearTeams": ["ENG"],
+      "github": "lucasilverentand/example",
+      "localPath": "/Users/luca/Developer/example",
+      "defaultBase": "main",
+      "testCommands": ["bun test"]
+    }
+  ],
+  "policies": [
+    {
+      "name": "docs-auto",
+      "labels": ["docs"],
+      "decision": "allow_auto",
+      "sandbox": "workspace-write"
+    },
+    {
+      "name": "security-plan-only",
+      "labels": ["security"],
+      "decision": "allow_plan_only",
+      "sandbox": "workspace-write"
+    }
+  ]
+}
