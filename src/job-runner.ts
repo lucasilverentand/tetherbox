@@ -139,7 +139,7 @@ export async function runJob(
       actionParameter: job.repo.github,
     });
     const pullRequest = await (options.finalizeRun ?? finalizeSuccessfulRun)(config, job, worktree);
-    await recordValidationResults(state, job, pullRequest.validation ?? []);
+    await recordValidationResults(config, state, job, pullRequest.validation ?? []);
     for (const warning of pullRequest.warnings ?? []) {
       await state.addEvent("warn", warning, job.id, "git");
       await postActivity(config, state, job, { type: "thought", body: warning });
@@ -239,7 +239,7 @@ export async function runJob(
     }
 
     if (error instanceof ValidationFailedError) {
-      await recordValidationResults(state, job, error.results);
+      await recordValidationResults(config, state, job, error.results);
       const failed = error.results.find((result) => result.status === "failed");
       await postActivity(config, state, job, {
         type: "error",
@@ -262,6 +262,7 @@ export async function runJob(
 }
 
 async function recordValidationResults(
+  config: BridgeConfig,
   state: StateStore,
   job: RoutedJob,
   results: ValidationCommandResult[],
@@ -273,6 +274,12 @@ async function recordValidationResults(
       job.id,
       "validation",
     );
+    await postActivity(config, state, job, {
+      type: "action",
+      action: result.status === "failed" ? "Validation failed" : "Validation passed",
+      parameter: result.command,
+      result: result.summary,
+    });
   }
 }
 
