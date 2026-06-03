@@ -15,8 +15,8 @@ COPY src ./src
 COPY generated ./generated
 
 RUN useradd --create-home --home-dir /home/tetherbox --shell /usr/sbin/nologin tetherbox \
-  && mkdir -p /var/lib/tetherbox /home/tetherbox/.ssh \
-  && chown -R tetherbox:tetherbox /app /var/lib/tetherbox /home/tetherbox/.ssh
+  && mkdir -p /var/lib/tetherbox /home/tetherbox/.codex /home/tetherbox/.ssh \
+  && chown -R tetherbox:tetherbox /app /var/lib/tetherbox /home/tetherbox/.codex /home/tetherbox/.ssh
 
 USER tetherbox
 
