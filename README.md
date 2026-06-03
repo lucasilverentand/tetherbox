@@ -45,10 +45,10 @@ Edit `config.local.json`, then run:
 bun run src/index.ts daemon --config config.local.json
 ```
 
-The daemon listens on the configured host and port. Use a tunnel such as Cloudflare Tunnel, Tailscale Funnel, or ngrok during development so Linear can reach `/webhooks/linear`.
+The daemon listens on the configured host and port. Open `/` for the browser dashboard or `/api/status` for the raw status API. Use a tunnel such as Cloudflare Tunnel, Tailscale Funnel, or ngrok during development so Linear can reach `/webhooks/linear`.
 Set `server.publicUrl` to the externally reachable tunnel URL when you want Linear Agent Sessions to link back to Tetherbox status.
 
-Open the terminal UI in another shell:
+Open the terminal UI in another shell when you want a local terminal control surface:
 
 ```bash
 bun run src/index.ts tui --url http://127.0.0.1:8787
@@ -82,6 +82,10 @@ Example service definitions live in `examples/`:
 - `tetherbox.service` for Linux `systemd --user`.
 
 Run the daemon as the same user that owns Codex auth, GitHub auth, SSH keys, and local repository checkouts.
+
+## Container Image
+
+Merges to `main` publish `ghcr.io/lucasilverentand/tetherbox:main` and `sha-*` images. Tags such as `v0.1.0` also publish matching semver image tags.
 
 ## Linear Webhook
 
