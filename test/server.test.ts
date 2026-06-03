@@ -8,6 +8,90 @@ import { StateStore } from "../src/state-store";
 import type { BridgeConfig, DaemonState, RoutedJob } from "../src/types";
 
 describe("server webhook handling", () => {
+  test("serves the browser dashboard from the daemon root", async () => {
+    const state = await loadedState();
+    const queue = new FakeQueue(state);
+    const handler = createRequestHandler({ config, state, queue, webhookSecret: "secret" });
+
+    try {
+      await state.createJob(jobFixture());
+      await state.updateJob("job-1", "running", "Codex is editing files", {
+        failureReason: undefined,
+      });
+      await state.addEvent("info", "Started Codex", "job-1", "codex");
+
+      const response = await handler(new Request("http://127.0.0.1:8787/"));
+      const html = await response.text();
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get("Content-Type")).toContain("text/html");
+      expect(html).toContain("<title>Tetherbox</title>");
+      expect(html).toContain("Queue");
+      expect(html).toContain("Jobs");
+      expect(html).toContain("Job Detail");
+      expect(html).toContain("Recent Events");
+      expect(html).toContain("OSS-1");
+      expect(html).toContain("Fix this");
+      expect(html).toContain("lucasilverentand/web");
+      expect(html).toContain("Codex is editing files");
+      expect(html).toContain("Started Codex");
+      expect(html).toContain("window.__TETHERBOX_INITIAL_STATE__");
+    } finally {
+      state.close();
+    }
+  });
+
+  test("renders dashboard empty states without changing api status", async () => {
+    const state = await loadedState();
+    const queue = new FakeQueue(state);
+    const handler = createRequestHandler({ config, state, queue, webhookSecret: "secret" });
+
+    try {
+      const dashboard = await handler(new Request("http://127.0.0.1:8787/"));
+      const status = await handler(new Request("http://127.0.0.1:8787/api/status"));
+      const html = await dashboard.text();
+      const statusBody = await status.json() as DaemonState;
+
+      expect(html).toContain("No jobs yet.");
+      expect(html).toContain("No events yet.");
+      expect(statusBody.jobs).toEqual([]);
+      expect(statusBody.events).toEqual([]);
+      expect(statusBody.queue).toEqual({
+        accepting: true,
+        concurrency: 1,
+        running: 0,
+        queued: 0,
+      });
+    } finally {
+      state.close();
+    }
+  });
+
+  test("renders browser job controls from existing operator actions", async () => {
+    const state = await loadedState();
+    const queue = new FakeQueue(state);
+    const handler = createRequestHandler({ config, state, queue, webhookSecret: "secret" });
+
+    try {
+      await state.createJob(jobFixture({
+        id: "job-approve",
+        policy: { ruleName: "approval", decision: "require_approval", sandbox: "workspace-write" },
+      }));
+      await state.updateJob("job-approve", "waiting_approval", "Approval required");
+      state.createApproval("job-approve", "Run local Codex");
+
+      const response = await handler(new Request("http://127.0.0.1:8787/"));
+      const html = await response.text();
+
+      expect(html).toContain('data-action="cancel" data-job-id="job-approve"');
+      expect(html).toContain('data-action="approve" data-job-id="job-approve"');
+      expect(html).toContain('data-action="deny" data-job-id="job-approve"');
+      expect(html).toContain("Operator token");
+    } finally {
+      state.close();
+    }
+  });
+
   test("acknowledges Linear webhooks before async job intake finishes", async () => {
     process.env.LINEAR_API_KEY = "lin_test";
     const fetchMock = mockDeferredFetch();

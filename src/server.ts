@@ -29,6 +29,7 @@ import { findExplicitRepo, routeRepoForSession } from "./repo-router";
 import { runJob } from "./job-runner";
 import { JobQueue } from "./job-queue";
 import { createJobId, StateStore } from "./state-store";
+import { renderWebUi } from "./web-ui";
 import type { BridgeConfig, JobRecord, RepoMapping, RoutedJob } from "./types";
 
 export async function serve(configPath: string): Promise<void> {
@@ -81,6 +82,12 @@ export function createRequestHandler(options: RequestHandlerOptions): (request: 
 
     if (request.method === "GET" && url.pathname === "/healthz") {
       return Response.json({ ok: true, startedAt: state.snapshot().startedAt });
+    }
+
+    if (request.method === "GET" && url.pathname === "/") {
+      return new Response(renderWebUi(state.snapshot(queue.stats())), {
+        headers: { "Content-Type": "text/html; charset=utf-8" },
+      });
     }
 
     if (request.method === "GET" && url.pathname === "/api/status") {

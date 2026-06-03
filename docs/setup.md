@@ -46,7 +46,15 @@ Start the daemon:
 bun run src/index.ts daemon --config config.local.json
 ```
 
-Open the TUI from another shell:
+Open the browser dashboard:
+
+```text
+http://127.0.0.1:8787/
+```
+
+The dashboard is served by the daemon. It shows daemon health, Linear install status, queue state, jobs, job detail, recent events, and common job actions. When the daemon is reachable through a non-loopback URL, enter the operator token configured by `server.operatorTokenEnv` before using job actions.
+
+Open the TUI from another shell when you want a terminal control surface:
 
 ```bash
 bun run src/index.ts tui --url http://127.0.0.1:8787
@@ -98,6 +106,7 @@ Linear must reach `/webhooks/linear` over HTTPS. Common options are:
 - A reverse proxy on a public host that forwards only the Tetherbox HTTP routes.
 
 Only expose the Tetherbox daemon HTTP server. Do not expose `codex app-server`.
+For homelab operation, prefer binding the daemon to loopback and placing tunnel or reverse-proxy access controls in front of the public URL. If the dashboard is available outside loopback, configure `server.operatorTokenEnv`; job actions such as cancel, retry, approve, and deny require that token.
 
 ## Codex And GitHub Auth
 
@@ -211,6 +220,39 @@ Install docs:
 - Linux `systemd --user`: [docs/install-linux.md](install-linux.md)
 
 Template service definitions live in `examples/`, while the install scripts generate host-specific files from the current repo path and config path.
+
+## Container Image
+
+Tetherbox publishes container images to:
+
+```text
+ghcr.io/lucasilverentand/tetherbox
+```
+
+The image runs the daemon with:
+
+```bash
+bun run src/index.ts daemon --config "$TETHERBOX_CONFIG"
+```
+
+`TETHERBOX_CONFIG` defaults to `/config/config.json`. Mount a config file there, mount a durable state volume for `state.path`, and provide Linear, GitHub, Codex, SSH, and operator token secrets through the environment or mounted files. The image includes Bun, Git, OpenSSH client, and Codex CLI; it does not include repository credentials or Codex auth.
+
+## Browser Dashboard
+
+Open the daemon root route in a browser:
+
+```text
+http://127.0.0.1:8787/
+```
+
+The dashboard polls `/api/status` and renders the same job and event state used by the TUI. It does not display raw config or secret values. Job actions call the existing operator endpoints:
+
+- `POST /api/jobs/:id/cancel`
+- `POST /api/jobs/:id/retry`
+- `POST /api/jobs/:id/approve`
+- `POST /api/jobs/:id/deny`
+
+Loopback requests can use those endpoints without an operator token. Non-loopback requests must include the token from `server.operatorTokenEnv`. The dashboard stores the entered token in browser session storage so it is not persisted across browser sessions.
 
 ## Operator TUI
 
