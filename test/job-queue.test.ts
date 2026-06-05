@@ -149,6 +149,37 @@ describe("JobQueue", () => {
     state.close();
   });
 
+  test("marks stale running jobs interrupted on startup", async () => {
+    const state = await loadedState();
+    const job = jobFixture("job-1");
+    await state.createJob(job);
+    await state.updateJob(job.id, "running", "Job started");
+
+    const queue = new JobQueue({
+      concurrency: 1,
+      state,
+      execute: async () => ({ status: "completed", message: "done" }),
+    });
+
+    const record = state.getJob(job.id);
+    expect(queue.stats()).toMatchObject({ running: 0, queued: 0 });
+    expect(record).toMatchObject({
+      status: "failed",
+      lastMessage: "Interrupted by daemon restart",
+      retryEligible: true,
+      retryCount: 1,
+      failureReason: "Interrupted by daemon restart",
+    });
+    const recoveryEvent = state.snapshot().events.find((event) => event.message === "Interrupted by daemon restart");
+    expect(recoveryEvent).toMatchObject({
+      jobId: job.id,
+      source: "queue",
+      level: "warn",
+      message: "Interrupted by daemon restart",
+    });
+    state.close();
+  });
+
   test("times out jobs waiting for approval", async () => {
     const state = await loadedState();
     const queue = new JobQueue({

@@ -337,6 +337,45 @@ export class StateStore {
     await this.addEvent(status === "failed" ? "error" : "info", lastMessage, id, "job");
   }
 
+  markRunningJobsInterrupted(message = "Interrupted by daemon restart"): number {
+    const db = this.requireDb();
+    const now = new Date().toISOString();
+    const rows = db.query("select id, session_id from jobs where status = 'running'").all() as Array<{
+      id: string;
+      session_id: string;
+    }>;
+    if (rows.length === 0) {
+      return 0;
+    }
+
+    const updateJob = db.query(
+      `update jobs set
+        status = 'failed',
+        last_message = ?,
+        updated_at = ?,
+        retry_eligible = 1,
+        retry_count = retry_count + 1,
+        failure_reason = ?
+       where id = ?`,
+    );
+    const updateSession = db.query(
+      `update sessions set
+        status = 'failed',
+        updated_at = ?
+       where id = ?`,
+    );
+
+    db.transaction(() => {
+      for (const row of rows) {
+        updateJob.run(message, now, message, row.id);
+        updateSession.run(now, row.session_id);
+        this.insertEvent("queue", "warn", message, row.id, now);
+      }
+    })();
+
+    return rows.length;
+  }
+
   async setJobWorktree(id: string, worktree: WorktreeInfo): Promise<void> {
     const db = this.requireDb();
     const now = new Date().toISOString();

@@ -39,6 +39,7 @@ export class JobQueue {
     if (!Number.isInteger(options.concurrency) || options.concurrency < 1) {
       throw new Error("Queue concurrency must be at least 1");
     }
+    this.options.state.markRunningJobsInterrupted();
     this.scheduleExistingApprovalTimeouts();
   }
 
