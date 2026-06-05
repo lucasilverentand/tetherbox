@@ -401,6 +401,110 @@ export async function updateLinearAgentSession(
   });
 }
 
+export async function createLinearAgentSessionOnIssue(
+  config: BridgeConfig,
+  issueId: string,
+  tokenStore?: LinearTokenStore,
+  workspaceId?: string,
+): Promise<{
+  id: string;
+  slugId?: string;
+  status?: string;
+  url?: string;
+  issue?: LinearIssueContext;
+} | undefined> {
+  const token = await getLinearAccessToken(config, tokenStore, workspaceId);
+  if (!token) {
+    logLinearFallback("agentSessionCreateOnIssue", { issueId });
+    return undefined;
+  }
+
+  const payload = await linearGraphql<{
+    agentSessionCreateOnIssue?: {
+      success?: boolean;
+      agentSession?: {
+        id?: string;
+        slugId?: string;
+        status?: string;
+        url?: string;
+        issue?: {
+          id?: string;
+          identifier?: string;
+          title?: string;
+          description?: string;
+          url?: string;
+          team?: { id?: string; key?: string };
+          labels?: { nodes?: Array<{ name?: string }> };
+        };
+      };
+    };
+  }>(token, config.linear.apiTimeoutMs, {
+    query: `mutation AgentSessionCreateOnIssue($input: AgentSessionCreateOnIssue!) {
+      agentSessionCreateOnIssue(input: $input) {
+        success
+        agentSession {
+          id
+          slugId
+          status
+          url
+          issue {
+            id
+            identifier
+            title
+            description
+            url
+            team {
+              id
+              key
+            }
+            labels {
+              nodes {
+                name
+              }
+            }
+          }
+        }
+      }
+    }`,
+    variables: {
+      input: { issueId },
+    },
+  });
+
+  const session = payload.agentSessionCreateOnIssue?.agentSession;
+  if (!session?.id) {
+    throw new Error("Linear did not return an agent session for the issue");
+  }
+  return {
+    id: session.id,
+    ...(session.slugId ? { slugId: session.slugId } : {}),
+    ...(session.status ? { status: session.status } : {}),
+    ...(session.url ? { url: session.url } : {}),
+    ...(session.issue ? { issue: linearIssueContextFromAgentSessionIssue(session.issue) } : {}),
+  };
+}
+
+function linearIssueContextFromAgentSessionIssue(issue: {
+  id?: string;
+  identifier?: string;
+  title?: string;
+  description?: string;
+  url?: string;
+  team?: { id?: string; key?: string };
+  labels?: { nodes?: Array<{ name?: string }> };
+}): LinearIssueContext {
+  return {
+    labels: issue.labels?.nodes?.map((label) => label.name).filter((name): name is string => Boolean(name)) ?? [],
+    ...(issue.id ? { id: issue.id } : {}),
+    ...(issue.identifier ? { identifier: issue.identifier } : {}),
+    ...(issue.title ? { title: issue.title } : {}),
+    ...(issue.description ? { description: issue.description } : {}),
+    ...(issue.url ? { url: issue.url } : {}),
+    ...(issue.team?.id ? { teamId: issue.team.id } : {}),
+    ...(issue.team?.key ? { teamKey: issue.team.key } : {}),
+  };
+}
+
 export async function suggestLinearRepositories(
   config: BridgeConfig,
   issueId: string | undefined,

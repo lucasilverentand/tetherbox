@@ -13,6 +13,7 @@ import {
   linearWorkspaceIdForEvent,
   buildLinearOAuthAuthorizationUrl,
   completeLinearOAuthCallback,
+  createLinearAgentSessionOnIssue,
   isStopSignal,
   listLinearAgentSessionActivities,
   parseApprovalDecision,
@@ -195,6 +196,25 @@ export function createRequestHandler(options: RequestHandlerOptions): (request: 
         if (deliveryId && !state.claimWebhookDelivery(deliveryId)) {
           return duplicateLinearWebhookResponse(state, deliveryId);
         }
+        const startedSession = await maybeStartLinearIssueSessionFromInboxNotification({
+          config,
+          state,
+          queue,
+          event: inboxNotification,
+          linearWorkspaceId,
+          deliveryId,
+        });
+        if (startedSession) {
+          return Response.json({
+            ok: true,
+            accepted: true,
+            eventType: inboxNotification.type,
+            action: inboxNotification.action,
+            sessionId: startedSession.sessionId,
+            jobId: startedSession.jobId,
+            canceledJobIds: [],
+          });
+        }
         const canceledJobIds = await handleLinearInboxNotificationWebhook(state, queue, inboxNotification);
         return Response.json({
           ok: true,
@@ -242,6 +262,59 @@ export function createRequestHandler(options: RequestHandlerOptions): (request: 
       return Response.json({ error: message }, { status: 400 });
     }
   };
+}
+
+async function maybeStartLinearIssueSessionFromInboxNotification(options: {
+  config: BridgeConfig;
+  state: StateStore;
+  queue: Pick<JobQueue, "cancel" | "enqueue">;
+  event: NonNullable<ReturnType<typeof getLinearInboxNotificationWebhook>>;
+  linearWorkspaceId?: string;
+  deliveryId?: string;
+}): Promise<{ sessionId: string; jobId: string } | undefined> {
+  const { config, state, queue, event, linearWorkspaceId, deliveryId } = options;
+  if (!shouldStartLinearIssueSessionFromInboxNotification(event)) {
+    return undefined;
+  }
+
+  if (!event.issue?.id) {
+    await state.addEvent("warn", "Cannot start Linear agent session from notification without issue id", undefined, "linear");
+    return undefined;
+  }
+
+  if (state.listActiveJobsForIssue(event.issue).length) {
+    await state.addEvent("info", formatLinearInboxNotificationWebhookEvent(event), undefined, "linear");
+    return undefined;
+  }
+
+  const session = await createLinearAgentSessionOnIssue(config, event.issue.id, state, linearWorkspaceId);
+  if (!session) {
+    await state.addEvent("warn", "Cannot start Linear agent session without Linear API access", undefined, "linear");
+    return undefined;
+  }
+
+  const sessionId = session.id;
+  const jobId = createJobId(sessionId);
+  const intakeEvent: ReturnType<typeof parseLinearAgentEvent> = {
+    action: "created",
+    ...(linearWorkspaceId ? { organizationId: linearWorkspaceId } : {}),
+    agentSession: {
+      id: sessionId,
+      issue: session.issue ?? {
+        labels: [],
+        ...event.issue,
+      },
+    },
+  };
+
+  void intakeLinearWebhook({ config, state, queue, event: intakeEvent, sessionId, jobId, linearWorkspaceId, deliveryId }).catch((error) => {
+    console.error("Linear inbox notification intake failed", error);
+  });
+  return { sessionId, jobId };
+}
+
+function shouldStartLinearIssueSessionFromInboxNotification(event: LinearInboxNotificationWebhook): boolean {
+  return event.action === "issueSubscribed";
 }
 
 const DEFAULT_LINEAR_WEBHOOK_MAX_AGE_MS = 60_000;

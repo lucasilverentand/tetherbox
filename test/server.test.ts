@@ -698,6 +698,137 @@ describe("server webhook handling", () => {
     }
   });
 
+  test("starts a Linear agent session from app-user issue subscription notifications", async () => {
+    process.env.LINEAR_API_KEY = "lin_test";
+    const fetchMock = mockDeferredFetch();
+    const state = await loadedState();
+    const queue = new FakeQueue();
+    const handler = createRequestHandler({
+      config,
+      state,
+      queue,
+      webhookSecret: "secret",
+    });
+    const body = linearBody({
+      type: "AppUserNotification",
+      action: "issueSubscribed",
+      organizationId: "org-1",
+      webhookId: "delivery-subscribe-1",
+      appUserId: "app-user-1",
+      notification: {
+        issue: {
+          id: "issue-1",
+          identifier: "WEB-123",
+          title: "Run delegated agent work",
+          url: "https://linear.app/seventwo/issue/WEB-123",
+        },
+      },
+    });
+
+    try {
+      const responsePromise = handler(
+        new Request("http://127.0.0.1:8787/webhooks/linear", {
+          method: "POST",
+          headers: { "Linear-Signature": signature(body, "secret") },
+          body,
+        }),
+      );
+
+      await waitFor(() => fetchMock.pending.length === 1);
+      expect(fetchMock.calls[0]).toMatchObject({
+        body: {
+          variables: {
+            input: { issueId: "issue-1" },
+          },
+        },
+      });
+      fetchMock.resolveNext({
+        data: {
+          agentSessionCreateOnIssue: {
+            success: true,
+            agentSession: {
+              id: "sess_issue_1",
+              slugId: "slug-1",
+              status: "active",
+              url: "https://linear.app/seventwo/issue/WEB-123#agent-session-sess_issue_1",
+              issue: {
+                id: "issue-1",
+                identifier: "WEB-123",
+                title: "Run delegated agent work",
+                description: "Use the web repository.",
+                url: "https://linear.app/seventwo/issue/WEB-123",
+                team: { id: "team-web", key: "WEB" },
+                labels: { nodes: [{ name: "Delegated" }] },
+              },
+            },
+          },
+        },
+      });
+
+      const response = await responsePromise;
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        ok: true,
+        accepted: true,
+        eventType: "AppUserNotification",
+        action: "issueSubscribed",
+        sessionId: "sess_issue_1",
+        jobId: expect.stringMatching(/^sess_issue_1-[a-f0-9]{8}$/),
+      });
+
+      await waitFor(() => fetchMock.pending.length === 1);
+      fetchMock.resolveNext({ data: { agentSessionUpdate: { success: true } } });
+      await waitFor(() => fetchMock.pending.length === 1);
+      fetchMock.resolveNext({ data: { agentActivityCreate: { success: true } } });
+      await waitFor(() => fetchMock.pending.length === 1);
+      fetchMock.resolveNext({
+        data: {
+          issue: {
+            id: "issue-1",
+            identifier: "WEB-123",
+            state: { id: "state-start", name: "In Progress", type: "started" },
+            team: { id: "team-web" },
+            delegate: { id: "app-user-1" },
+          },
+        },
+      });
+      await waitFor(() => fetchMock.pending.length === 1);
+      fetchMock.resolveNext({ data: { agentSession: { activities: { edges: [] } } } });
+      await waitFor(() => fetchMock.pending.length === 1);
+      fetchMock.resolveNext({ data: { issueRepositorySuggestions: { suggestions: [] } } });
+      await waitFor(() => fetchMock.pending.length === 1);
+      fetchMock.resolveNext({ data: { agentSessionUpdate: { success: true } } });
+      await waitFor(() => fetchMock.pending.length === 1);
+      fetchMock.resolveNext({ data: { agentActivityCreate: { success: true } } });
+      await waitFor(() => queue.jobs.length === 1);
+
+      expect(queue.jobs[0]).toMatchObject({
+        sessionId: "sess_issue_1",
+        linearWorkspaceId: "org-1",
+        repo: { github: "lucasilverentand/web" },
+        issue: {
+          id: "issue-1",
+          identifier: "WEB-123",
+          teamKey: "WEB",
+          labels: ["Delegated"],
+        },
+      });
+      expect(queue.jobs[0]?.prompt).toContain("WEB-123: Run delegated agent work");
+      expect(queue.jobs[0]?.prompt).toContain("Use the web repository.");
+      expect(state.getProcessedWebhook("delivery-subscribe-1")).toBeDefined();
+      const activities = linearActivityInputs(fetchMock.calls);
+      expect(activities).toContainEqual(expect.objectContaining({
+        content: expect.objectContaining({
+          body: expect.stringContaining("Received Linear session sess_issue_1"),
+        }),
+      }));
+    } finally {
+      fetchMock.restore();
+      state.close();
+      delete process.env.LINEAR_API_KEY;
+    }
+  });
+
   test("attaches Linear mention notification context to matching active jobs", async () => {
     const state = await loadedState();
     const queue = new FakeQueue(state);
