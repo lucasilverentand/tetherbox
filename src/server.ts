@@ -273,8 +273,7 @@ function linearWebhookTimestampError(
   return undefined;
 }
 
-async function duplicateLinearWebhookResponse(state: StateStore, deliveryId: string): Promise<Response> {
-  await state.addEvent("info", `Ignored duplicate Linear webhook delivery ${deliveryId}`, undefined, "linear");
+function duplicateLinearWebhookResponse(_state: StateStore, deliveryId: string): Response {
   return Response.json({
     ok: true,
     accepted: false,

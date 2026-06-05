@@ -1587,10 +1587,8 @@ describe("server webhook handling", () => {
       });
       expect(queue.jobs).toHaveLength(1);
       expect(state.snapshot().jobs).toHaveLength(1);
-      expect(state.snapshot().events).toContainEqual(expect.objectContaining({
-        level: "info",
-        source: "linear",
-        message: "Ignored duplicate Linear webhook delivery delivery-agent-1",
+      expect(state.snapshot().events).not.toContainEqual(expect.objectContaining({
+        message: expect.stringContaining("Ignored duplicate Linear webhook delivery"),
       }));
     } finally {
       state.close();
@@ -1637,7 +1635,7 @@ describe("server webhook handling", () => {
       expect(second.status).toBe(200);
       expect(await second.json()).toMatchObject({ accepted: false, reason: "duplicate_webhook" });
       expect(events.filter((event) => event.message.includes("Linear app team access changed"))).toHaveLength(1);
-      expect(events.filter((event) => event.message.includes("Ignored duplicate Linear webhook delivery"))).toHaveLength(1);
+      expect(events.filter((event) => event.message.includes("Ignored duplicate Linear webhook delivery"))).toHaveLength(0);
       expect(queue.jobs).toHaveLength(0);
     } finally {
       state.close();
@@ -1701,7 +1699,7 @@ describe("server webhook handling", () => {
       expect(queue.jobs).toHaveLength(0);
       expect(state.getJob("job-running")?.status).toBe("canceled");
       expect(events.filter((event) => event.message.includes("issueUnassignedFromYou"))).toHaveLength(1);
-      expect(events.filter((event) => event.message.includes("Ignored duplicate Linear webhook delivery"))).toHaveLength(1);
+      expect(events.filter((event) => event.message.includes("Ignored duplicate Linear webhook delivery"))).toHaveLength(0);
     } finally {
       state.close();
     }
