@@ -1485,6 +1485,52 @@ describe("Linear webhook handling", () => {
     }
   });
 
+  test("renews expired app actor tokens with client credentials before GraphQL calls", async () => {
+    process.env.LINEAR_CLIENT_ID = "client-1";
+    process.env.LINEAR_CLIENT_SECRET = "secret-1";
+    delete process.env.LINEAR_API_KEY;
+    const calls: unknown[] = [];
+    const restore = mockFetchSequence(calls, [
+      new Response(
+        JSON.stringify({
+          access_token: "access-client-2",
+          token_type: "Bearer",
+          expires_in: 3600,
+          scope: "app:assignable app:mentionable read write",
+        }),
+        { status: 200 },
+      ),
+      new Response(JSON.stringify({ data: { agentActivityCreate: { success: true } } }), { status: 200 }),
+    ]);
+    const store = await loadedState();
+    store.saveLinearInstallation({
+      workspaceId: "default",
+      appUserId: "app-user-1",
+      accessToken: "access-client-1",
+      tokenType: "Bearer",
+      scope: "app:assignable app:mentionable read write",
+      expiresAt: "2020-01-01T00:00:00.000Z",
+    });
+
+    try {
+      await postLinearActivity(oauthConfig, "sess_1", { type: "thought", body: "Working" }, store);
+      expect(calls[0]).toMatchObject({
+        body: "grant_type=client_credentials&scope=app%3Aassignable+app%3Amentionable+read+write&client_id=client-1&client_secret=secret-1",
+      });
+      expect(calls[1]).toMatchObject({ headers: { Authorization: "Bearer access-client-2" } });
+      expect(store.getLinearInstallation("default")).toMatchObject({
+        appUserId: "app-user-1",
+        accessToken: "access-client-2",
+        refreshToken: undefined,
+      });
+    } finally {
+      restore();
+      store.close();
+      delete process.env.LINEAR_CLIENT_ID;
+      delete process.env.LINEAR_CLIENT_SECRET;
+    }
+  });
+
   test("defaults bounded Linear API settings", async () => {
     const dir = await mkdtemp(join(tmpdir(), "linear-config-"));
     const configPath = join(dir, "config.json");

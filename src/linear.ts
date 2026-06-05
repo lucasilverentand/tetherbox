@@ -740,7 +740,21 @@ async function getLinearAccessToken(
   }
 
   if (!installation.refreshToken) {
-    return installation.accessToken;
+    const refreshed = await exchangeLinearClientCredentialsToken(config, installation.scope);
+    if (!refreshed) {
+      return installation.accessToken;
+    }
+
+    tokenStore?.saveLinearInstallation({
+      workspaceId: installation.workspaceId,
+      appUserId: installation.appUserId,
+      accessToken: refreshed.access_token,
+      refreshToken: refreshed.refresh_token,
+      tokenType: refreshed.token_type,
+      scope: normalizeScope(refreshed.scope),
+      expiresAt: expiresAt(refreshed.expires_in),
+    });
+    return refreshed.access_token;
   }
 
   const refreshed = await exchangeLinearOAuthToken(config, {
@@ -1263,6 +1277,26 @@ async function exchangeLinearOAuthToken(
   };
 }
 
+async function exchangeLinearClientCredentialsToken(
+  config: BridgeConfig,
+  scope: string | undefined,
+): Promise<{
+  access_token: string;
+  token_type: string;
+  expires_in?: number;
+  scope?: string | string[];
+  refresh_token?: string;
+} | undefined> {
+  if (!hasConfiguredLinearOAuthClient(config)) {
+    return undefined;
+  }
+
+  return exchangeLinearOAuthToken(config, {
+    grant_type: "client_credentials",
+    scope: scope?.trim() || linearAppActorOAuthScopes(config).join(" "),
+  });
+}
+
 async function fetchLinearViewer(
   config: BridgeConfig,
   accessToken: string,
@@ -1308,6 +1342,12 @@ function getRequiredConfigEnv(name: string | undefined, field: string): string {
     throw new Error(`Missing required environment variable ${name}`);
   }
   return value;
+}
+
+function hasConfiguredLinearOAuthClient(config: BridgeConfig): boolean {
+  const clientIdEnv = config.linear.oauthClientIdEnv;
+  const clientSecretEnv = config.linear.oauthClientSecretEnv;
+  return Boolean(clientIdEnv && clientSecretEnv && process.env[clientIdEnv] && process.env[clientSecretEnv]);
 }
 
 function randomState(): string {
