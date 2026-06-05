@@ -127,6 +127,7 @@ export class CodexAppServerClient {
       ((await this.request("thread/start", {
         model: options.model,
         cwd: options.cwd,
+        approvalPolicy: "never",
         sandbox: options.sandbox,
       })) as { thread?: { id?: string } }).thread?.id;
 
@@ -143,6 +144,7 @@ export class CodexAppServerClient {
         threadId: thread,
         input: [{ type: "text", text: options.input }],
         cwd: options.cwd,
+        approvalPolicy: "never",
         sandbox: options.sandbox,
         model: options.model,
       });
@@ -221,6 +223,11 @@ export class CodexAppServerClient {
       return;
     }
 
+    if (message.method && typeof message.id === "number") {
+      this.handleServerRequest(message.id, message.method);
+      return;
+    }
+
     if (message.method) {
       this.handleNotification({
         method: message.method,
@@ -255,6 +262,23 @@ export class CodexAppServerClient {
       this.activeTurn = undefined;
       this.activeNotificationHandler = undefined;
     }
+  }
+
+  private handleServerRequest(id: number, method: string): void {
+    const error = new CodexAppServerError(
+      "request_error",
+      `Codex app-server requested unsupported interaction: ${method}`,
+    );
+    this.emitLifecycle("error", error.reason, error.message);
+    this.write({
+      id,
+      error: {
+        message: "Tetherbox runs Codex non-interactively and cannot satisfy approval requests.",
+      },
+    });
+    this.activeTurn?.reject(error);
+    this.activeTurn = undefined;
+    this.activeNotificationHandler = undefined;
   }
 
   private failAll(error: CodexAppServerError): void {

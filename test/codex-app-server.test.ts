@@ -39,6 +39,45 @@ describe("CodexAppServerClient", () => {
     expect(threadId).toBe("thread-42");
   });
 
+  test("starts and runs turns with non-interactive approvals", async () => {
+    const client = new CodexAppServerClient(await fakeCodex("require-never-policy"));
+
+    const threadId = await client.runTurn({
+      cwd: "/tmp",
+      input: "hello",
+      sandbox: "read-only",
+    });
+    client.stop();
+
+    expect(threadId).toBe("thread-1");
+  });
+
+  test("fails fast when Codex requests unsupported interactive approval", async () => {
+    const events: CodexAppServerLifecycleEvent[] = [];
+    const client = new CodexAppServerClient(await fakeCodex("approval-request"), {
+      turnTimeoutMs: 1_000,
+      onLifecycleEvent: (event) => events.push(event),
+    });
+
+    await expect(
+      client.runTurn({
+        cwd: "/tmp",
+        input: "hello",
+        sandbox: "read-only",
+      }),
+    ).rejects.toMatchObject({
+      reason: "request_error",
+      message: "Codex app-server requested unsupported interaction: item/commandExecution/requestApproval",
+    });
+    client.stop();
+
+    expect(events).toContainEqual(expect.objectContaining({
+      level: "error",
+      reason: "request_error",
+      message: "Codex app-server requested unsupported interaction: item/commandExecution/requestApproval",
+    }));
+  });
+
   test("fails startup with a structured timeout reason", async () => {
     const client = new CodexAppServerClient(await fakeCodex("startup-timeout"), { startupTimeoutMs: 5 });
 
@@ -154,13 +193,36 @@ lines.on("line", (line) => {
       console.log(JSON.stringify({ id: message.id, error: { message: "thread failed" } }));
       return;
     }
+    if (scenario === "require-never-policy" && message.params.approvalPolicy !== "never") {
+      console.log(JSON.stringify({ id: message.id, error: { message: "expected never thread approval policy" } }));
+      return;
+    }
     respond(message.id, { thread: { id: "thread-1" } });
     return;
   }
   if (message.method === "turn/start") {
+    if (scenario === "require-never-policy" && message.params.approvalPolicy !== "never") {
+      console.log(JSON.stringify({ id: message.id, error: { message: "expected never turn approval policy" } }));
+      return;
+    }
     respond(message.id, {});
     if (scenario === "process-exit") {
       process.exit(2);
+    }
+    if (scenario === "approval-request") {
+      console.log(JSON.stringify({
+        id: 900,
+        method: "item/commandExecution/requestApproval",
+        params: {
+          itemId: "item-1",
+          approvalId: "approval-1",
+          command: ["rg", "TODO"],
+          cwd: "/tmp",
+          reason: "search repo",
+          parsedCmd: [],
+        },
+      }));
+      return;
     }
     if (scenario !== "turn-timeout") {
       console.log(JSON.stringify({ method: "turn/completed", params: {} }));
