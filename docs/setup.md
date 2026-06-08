@@ -201,7 +201,7 @@ Tetherbox creates commits from the isolated job worktree after configured valida
 }
 ```
 
-When the key exists, Tetherbox runs `git -c gpg.format=ssh -c user.signingKey=<path> commit -S ...` and includes `Co-authored-by: Codex <codex@openai.com>`. If the configured key is missing or signing fails, Tetherbox records a warning and creates an unsigned co-authored commit so the job can still open a pull request.
+When the key exists, Tetherbox runs `git -c gpg.format=ssh -c user.signingKey=<path> commit -S ...` and includes `Co-authored-by: Codex <codex@openai.com>`. If the configured key is missing or signing with that key fails, Tetherbox records a warning and tries `git commit -S ...` with the worktree's Git signing config. If Git still cannot create a signed commit, the job fails before pushing or opening a pull request.
 
 ## Service Install
 

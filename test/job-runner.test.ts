@@ -57,7 +57,7 @@ describe("runJob", () => {
       prepareWorktree: async () => worktree,
       finalizeRun: async () => ({
         status: "no_changes",
-        warnings: ["Git signing key not found at /tmp/key; created an unsigned commit."],
+        warnings: ["Git signing key not found at /tmp/key; trying Git's configured signing key."],
       }),
     });
     const event = state.snapshot().events.find((candidate) => candidate.source === "git");
@@ -69,7 +69,7 @@ describe("runJob", () => {
     });
     expect(event).toMatchObject({
       level: "warn",
-      message: "Git signing key not found at /tmp/key; created an unsigned commit.",
+      message: "Git signing key not found at /tmp/key; trying Git's configured signing key.",
       jobId: "job-2",
     });
   });
