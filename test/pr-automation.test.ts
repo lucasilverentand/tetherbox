@@ -145,7 +145,7 @@ describe("pull request automation", () => {
     expect(create).toBeUndefined();
   });
 
-  test("creates an unsigned co-authored commit when the configured signing key is missing", async () => {
+  test("uses Git's configured signing key when the configured signing key is missing", async () => {
     const runner = new FakeRunner([
       { stdout: " M src/app.ts\n", stderr: "" },
       { stdout: "", stderr: "" },
@@ -161,18 +161,19 @@ describe("pull request automation", () => {
     );
 
     expect(result.warnings).toEqual([
-      "Git signing key not found at /tmp/codex_signing_key; created an unsigned commit.",
+      "Git signing key not found at /tmp/codex_signing_key; trying Git's configured signing key.",
     ]);
     expect(commit?.kind).toBe("run");
     if (!commit || commit.kind !== "run") {
-      throw new Error("Expected unsigned git commit command");
+      throw new Error("Expected git commit command");
     }
     expect(commit.args).toContain("commit");
+    expect(commit.args).toContain("-S");
     expect(commit.args).toContain("Co-authored-by: Codex <codex@openai.com>");
-    expect(commit.args).not.toContain("-S");
+    expect(commit.args).not.toContain("user.signingKey=/tmp/codex_signing_key");
   });
 
-  test("falls back to an unsigned commit when signing fails", async () => {
+  test("uses Git's configured signing key when signing with the configured key fails", async () => {
     const runner = new FakeRunner([
       { stdout: " M src/app.ts\n", stderr: "" },
       { stdout: "", stderr: "" },
@@ -189,10 +190,15 @@ describe("pull request automation", () => {
       (command) => command.kind === "run" && command.command === "git" && command.args.includes("commit"),
     );
 
-    expect(result.warnings?.[0]).toContain("Signed commit failed; created an unsigned commit instead.");
+    expect(result.warnings?.[0]).toContain(
+      "Signed commit with /tmp/codex_signing_key failed; trying Git's configured signing key.",
+    );
     expect(commits).toHaveLength(2);
     expect(commits[0]?.kind === "run" ? commits[0].args.includes("-S") : false).toBe(true);
-    expect(commits[1]?.kind === "run" ? commits[1].args.includes("-S") : true).toBe(false);
+    expect(commits[1]?.kind === "run" ? commits[1].args.includes("-S") : false).toBe(true);
+    expect(commits[1]?.kind === "run" ? commits[1].args.includes("user.signingKey=/tmp/codex_signing_key") : true).toBe(
+      false,
+    );
   });
 
   test("classifies GitHub CLI authentication failures", async () => {

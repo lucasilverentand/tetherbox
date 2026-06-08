@@ -248,31 +248,47 @@ async function createCommit(
   runner: CommandRunner,
   warnings: string[],
 ): Promise<void> {
-  const unsignedArgs = commitArgs(job);
   const signingKeyPath = expandHome(config.git?.signingKeyPath);
 
   if (!signingKeyPath) {
-    await runner.run("git", unsignedArgs, worktree.path);
+    await runSignedCommitWithGitConfig(job, worktree, runner);
     return;
   }
 
   if (!(await fileExists(runner, signingKeyPath))) {
-    warnings.push(`Git signing key not found at ${signingKeyPath}; created an unsigned commit.`);
-    await runner.run("git", unsignedArgs, worktree.path);
+    warnings.push(`Git signing key not found at ${signingKeyPath}; trying Git's configured signing key.`);
+    await runSignedCommitWithGitConfig(job, worktree, runner);
     return;
   }
 
   try {
-    await runner.run(
-      "git",
-      ["-c", "gpg.format=ssh", "-c", `user.signingKey=${signingKeyPath}`, ...commitArgs(job, true)],
-      worktree.path,
-    );
+    await runSignedCommitWithKey(job, worktree, runner, signingKeyPath);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    warnings.push(`Signed commit failed; created an unsigned commit instead. ${message}`);
-    await runner.run("git", unsignedArgs, worktree.path);
+    warnings.push(`Signed commit with ${signingKeyPath} failed; trying Git's configured signing key. ${message}`);
+    await runSignedCommitWithGitConfig(job, worktree, runner);
   }
+}
+
+function runSignedCommitWithKey(
+  job: RoutedJob,
+  worktree: WorktreeInfo,
+  runner: CommandRunner,
+  signingKeyPath: string,
+): Promise<CommandResult> {
+  return runner.run(
+    "git",
+    ["-c", "gpg.format=ssh", "-c", `user.signingKey=${signingKeyPath}`, ...commitArgs(job, true)],
+    worktree.path,
+  );
+}
+
+function runSignedCommitWithGitConfig(
+  job: RoutedJob,
+  worktree: WorktreeInfo,
+  runner: CommandRunner,
+): Promise<CommandResult> {
+  return runner.run("git", commitArgs(job, true), worktree.path);
 }
 
 function commitArgs(job: RoutedJob, sign = false): string[] {
