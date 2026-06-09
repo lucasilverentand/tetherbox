@@ -78,6 +78,19 @@ describe("CodexAppServerClient", () => {
     }));
   });
 
+  test("cancels MCP elicitations without failing the turn", async () => {
+    const client = new CodexAppServerClient(await fakeCodex("elicitation-request"));
+
+    await expect(
+      client.runTurn({
+        cwd: "/tmp",
+        input: "hello",
+        sandbox: "read-only",
+      }),
+    ).resolves.toBe("thread-1");
+    client.stop();
+  });
+
   test("fails startup with a structured timeout reason", async () => {
     const client = new CodexAppServerClient(await fakeCodex("startup-timeout"), { startupTimeoutMs: 5 });
 
@@ -224,9 +237,36 @@ lines.on("line", (line) => {
       }));
       return;
     }
+    if (scenario === "elicitation-request") {
+      console.log(JSON.stringify({
+        id: 901,
+        method: "mcpServer/elicitation/request",
+        params: {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          serverName: "Linear",
+          mode: "form",
+          message: "Select a project",
+          requestedSchema: {
+            type: "object",
+            properties: {},
+          },
+          _meta: null,
+        },
+      }));
+      return;
+    }
     if (scenario !== "turn-timeout") {
       console.log(JSON.stringify({ method: "turn/completed", params: {} }));
     }
+    return;
+  }
+  if (scenario === "elicitation-request" && message.id === 901) {
+    if (message.result?.action !== "cancel" || message.result?.content !== null || message.result?._meta !== null) {
+      console.log(JSON.stringify({ id: 999, error: { message: "expected canceled elicitation" } }));
+      return;
+    }
+    console.log(JSON.stringify({ method: "turn/completed", params: {} }));
   }
 });
 

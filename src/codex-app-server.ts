@@ -265,6 +265,18 @@ export class CodexAppServerClient {
   }
 
   private handleServerRequest(id: number, method: string): void {
+    if (method === "mcpServer/elicitation/request") {
+      this.write({
+        id,
+        result: {
+          action: "cancel",
+          content: null,
+          _meta: null,
+        },
+      });
+      return;
+    }
+
     const error = new CodexAppServerError(
       "request_error",
       `Codex app-server requested unsupported interaction: ${method}`,
