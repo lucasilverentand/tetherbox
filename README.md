@@ -135,6 +135,7 @@ Jobs with `require_approval` create a pending Linear approval and enter `waiting
 
 See:
 
+- [Vision](docs/vision.md)
 - [Setup](docs/setup.md)
 - [Security](docs/security.md)
 - [Release readiness](docs/release-readiness.md)
