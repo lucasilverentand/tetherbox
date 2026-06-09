@@ -35,8 +35,8 @@ export function applyPolicy(
   }
 
   return {
-    ruleName: "default-require-approval",
-    decision: "require_approval",
+    ruleName: "default-linear-delegation",
+    decision: "allow_auto",
     sandbox: config.codex.sandbox,
   };
 }

@@ -137,8 +137,8 @@ describe("policy and repo routing", () => {
       repo,
     );
 
-    expect(decision.ruleName).toBe("default-require-approval");
-    expect(decision.decision).toBe("require_approval");
+    expect(decision.ruleName).toBe("default-linear-delegation");
+    expect(decision.decision).toBe("allow_auto");
   });
 
   test("matches policy paths from issue text and prompt context", () => {
@@ -167,10 +167,11 @@ describe("policy and repo routing", () => {
     expect(decision.decision).toBe("require_approval");
   });
 
-  test("requires approval by default", () => {
+  test("allows delegated Linear work by default", () => {
     const repo = config.repos[0]!;
     const decision = applyPolicy(config, { teamKey: "ENG", labels: [] }, repo);
-    expect(decision.decision).toBe("require_approval");
+    expect(decision.ruleName).toBe("default-linear-delegation");
+    expect(decision.decision).toBe("allow_auto");
   });
 });
 

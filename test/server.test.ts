@@ -352,7 +352,7 @@ describe("server webhook handling", () => {
       },
       repo: config.repos[0]!,
       policy: {
-        ruleName: "default-require-approval",
+        ruleName: "manual-approval",
         decision: "require_approval",
         sandbox: "workspace-write",
       },
@@ -389,7 +389,7 @@ describe("server webhook handling", () => {
         prompt: "Original issue context",
         policy: {
           decision: "allow_auto",
-          ruleName: "default-require-approval:approved",
+          ruleName: "manual-approval:approved",
         },
       });
       expect(state.getPendingApprovalForSession("sess_1")).toBeUndefined();
