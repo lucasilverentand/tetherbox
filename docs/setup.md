@@ -176,6 +176,8 @@ Supported decisions:
 
 `allow_plan_only` runs Codex in read-only mode and does not open a pull request. `require_approval` creates a pending approval and waits for a Linear reply. Pending approvals expire after `queue.approvalTimeoutMs`.
 
+If no policy rule matches, the delegated Linear issue is allowed to start Codex with `allow_auto`. Add explicit `require_approval`, `allow_plan_only`, or `deny` rules for work that should not auto-run.
+
 ## Validation Commands
 
 Each repo mapping can define `testCommands`. Tetherbox runs those commands in the isolated job worktree after Codex returns and before committing:

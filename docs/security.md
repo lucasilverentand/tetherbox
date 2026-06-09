@@ -59,6 +59,8 @@ Policy decisions define how much automation is allowed:
 - `require_approval`: post a Linear approval prompt and wait.
 - `deny`: refuse the job before Codex starts.
 
+When no policy rule matches, Tetherbox treats Linear delegation as approval to start Codex and applies `allow_auto`. Add explicit `require_approval`, `allow_plan_only`, or `deny` rules for sensitive work.
+
 Approval-required jobs persist a pending approval in SQLite. Replies such as `approve` continue the job; `deny`, `cancel`, or a Linear stop signal cancel it. Pending approvals expire after `queue.approvalTimeoutMs`.
 
 Approving a job changes the local policy decision for that resumed job to an approved auto run. Use `require_approval` for work that can be allowed after explicit human confirmation, and `deny` for work that should never run through this daemon.
@@ -94,5 +96,5 @@ Before delegating real issues:
 2. Confirm Linear webhook signature verification is enabled with the expected secret.
 3. Confirm `codex.minSupportedVersion` is set or generated protocol metadata is current.
 4. Confirm each repo mapping points at the intended local checkout.
-5. Confirm policies default to approval or deny for sensitive work.
+5. Confirm sensitive work has explicit approval, plan-only, or deny policies.
 6. Run `bun run check`.

@@ -127,9 +127,9 @@ Configure policy rules under `policies` in config order. The first matching rule
 - `teams`: Linear team keys.
 - `priorities`: Linear priority numbers.
 
-Supported decisions are `allow_auto`, `allow_plan_only`, `require_approval`, and `deny`. The applied policy rule and decision are persisted with each job for `/api/status` and the TUI, and the runner posts the applied policy back to Linear as activity.
+Supported decisions are `allow_auto`, `allow_plan_only`, `require_approval`, and `deny`. The applied policy rule and decision are persisted with each job for `/api/status` and the TUI, and the runner posts the applied policy back to Linear as activity. If no rule matches, Linear delegation is treated as approval to start Codex and the job uses `allow_auto`.
 
-Jobs with `require_approval` create a pending Linear approval and enter `waiting_approval`. Reply `approve` to continue, or `deny`/`cancel` to stop the job. Pending approvals expire after `queue.approvalTimeoutMs` milliseconds, defaulting to 24 hours.
+Jobs matching an explicit `require_approval` policy create a pending Linear approval and enter `waiting_approval`. Reply `approve` to continue, or `deny`/`cancel` to stop the job. Pending approvals expire after `queue.approvalTimeoutMs` milliseconds, defaulting to 24 hours.
 
 ## Design
 
