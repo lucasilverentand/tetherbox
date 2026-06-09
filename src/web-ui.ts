@@ -82,7 +82,7 @@ function renderJobCard(job: JobRecord, index: number): string {
   return `<button class="job-card${selected}" type="button" data-job-id="${escapeAttr(job.id)}">
     <span class="job-row">
       <strong>${escapeHtml(job.issueIdentifier ?? "No issue")}</strong>
-      <span class="status status-${escapeAttr(job.status)}">${escapeHtml(job.status)}</span>
+      <span class="status status-${escapeAttr(job.status)}">${escapeHtml(formatStatus(job.status))}</span>
     </span>
     <span class="job-title">${escapeHtml(job.issueTitle ?? job.id)}</span>
     <span class="job-meta">${escapeHtml(job.repo)} · ${escapeHtml(formatDate(job.updatedAt))}</span>
@@ -95,26 +95,58 @@ function renderJobDetail(job: JobRecord | undefined, events: DaemonEvent[]): str
     return `<p class="muted">No job selected.</p>`;
   }
   const actions = renderActions(job);
-  const rows = [
-    ["ID", job.id],
-    ["Session", job.sessionId],
-    ["Status", job.status],
-    ["Repository", job.repo],
-    ["Issue", [job.issueIdentifier, job.issueTitle].filter(Boolean).join(" ") || "none"],
-    ["Policy", `${job.policyRule} -> ${job.policyDecision}`],
-    ["Branch", job.branchName ?? "none"],
-    ["Worktree", job.worktreePath ?? "none"],
-    ["Retry", `${job.retryEligible ? "eligible" : "not eligible"} (${job.retryCount})`],
-    ["Last", job.lastMessage],
-  ];
   const jobEvents = events.filter((event) => event.jobId === job.id).slice(0, 8);
   return `<div class="detail">
     ${actions ? `<div class="actions">${actions}</div>` : ""}
-    <dl>${rows.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join("")}</dl>
+    <section class="job-summary" aria-label="Selected job summary">
+      <div>
+        <span class="eyebrow">${escapeHtml(job.issueIdentifier ?? "No issue")}</span>
+        <h3>${escapeHtml(job.issueTitle ?? job.id)}</h3>
+        <p>${escapeHtml(job.lastMessage)}</p>
+      </div>
+      <span class="status status-${escapeAttr(job.status)}">${escapeHtml(formatStatus(job.status))}</span>
+    </section>
     ${job.failureReason ? `<p class="failure">${escapeHtml(job.failureReason)}</p>` : ""}
+    <section class="detail-block">
+      <h3>Identity</h3>
+      ${renderFieldList([
+        ["Job ID", job.id],
+        ["Session", job.sessionId],
+        ["Repository", job.repo],
+      ])}
+    </section>
+    <section class="detail-block">
+      <h3>Routing</h3>
+      ${renderFieldList([
+        ["Branch", job.branchName ?? "none"],
+        ["Worktree", job.worktreePath ?? "none"],
+      ])}
+    </section>
+    <section class="detail-block">
+      <h3>Policy</h3>
+      ${renderFieldList([
+        ["Rule", job.policyRule],
+        ["Decision", formatPolicyDecision(job.policyDecision)],
+        ["Retry", formatRetry(job)],
+      ])}
+    </section>
+    <section class="detail-block">
+      <h3>Timeline</h3>
+      ${renderFieldList([
+        ["Created", formatDateTime(job.createdAt)],
+        ["Started", job.startedAt ? formatDateTime(job.startedAt) : "not started"],
+        ["Updated", formatDateTime(job.updatedAt)],
+        ["Finished", formatFinishedAt(job)],
+      ])}
+    </section>
+    ${job.prompt ? `<section class="detail-block prompt-block"><h3>Prompt</h3><pre>${escapeHtml(truncateText(job.prompt, 1800))}</pre></section>` : ""}
     <h3>Job Events</h3>
     <div class="events compact">${jobEvents.length ? jobEvents.map(renderEventRow).join("") : `<p class="muted">No job events yet.</p>`}</div>
   </div>`;
+}
+
+function renderFieldList(rows: [string, string][]): string {
+  return `<dl>${rows.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join("")}</dl>`;
 }
 
 function renderActions(job: JobRecord): string {
@@ -173,6 +205,50 @@ function formatDate(value: string): string {
   });
 }
 
+function formatDateTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return date.toLocaleString([], {
+    month: "short",
+    day: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function formatFinishedAt(job: JobRecord): string {
+  if (job.completedAt) {
+    return formatDateTime(job.completedAt);
+  }
+  if (job.canceledAt) {
+    return formatDateTime(job.canceledAt);
+  }
+  return "not finished";
+}
+
+function formatPolicyDecision(value: string): string {
+  return value.replace(/_/g, " ");
+}
+
+function formatRetry(job: JobRecord): string {
+  const eligibility = job.retryEligible ? "eligible" : "not eligible";
+  return `${eligibility}, ${job.retryCount} ${job.retryCount === 1 ? "attempt" : "attempts"}`;
+}
+
+function formatStatus(value: string): string {
+  return value.replace(/_/g, " ");
+}
+
+function truncateText(value: string, maxLength: number): string {
+  if (value.length <= maxLength) {
+    return value;
+  }
+  return `${value.slice(0, maxLength - 3)}...`;
+}
+
 function escapeHtml(value: string | number): string {
   return String(value)
     .replace(/&/g, "&amp;")
@@ -201,7 +277,7 @@ button, input { font: inherit; }
 h1, h2, h3, p { margin: 0; }
 h1 { font-size: 28px; line-height: 1.1; }
 h2 { font-size: 16px; }
-h3 { font-size: 13px; margin-top: 18px; margin-bottom: 8px; color: #42504b; }
+h3 { font-size: 13px; margin: 0 0 8px; color: #42504b; }
 .topbar p, .muted { color: #65716d; font-size: 13px; }
 .toolbar { display: flex; gap: 8px; align-items: center; }
 input { width: min(260px, 44vw); border: 1px solid #c8d0cc; border-radius: 6px; padding: 8px 10px; background: #ffffff; color: inherit; }
@@ -228,12 +304,20 @@ button:hover { border-color: #65716d; }
 .status-failed, .status-canceled, .status-denied { background: #f8e9e7; color: #8d281f; }
 .status-completed { background: #e8eef7; color: #234f87; }
 .status-waiting_approval { background: #f7efdd; color: #725314; }
+.detail { display: grid; gap: 14px; }
+.job-summary { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; padding-bottom: 14px; border-bottom: 1px solid #e3e7e5; }
+.job-summary h3 { color: #19201e; font-size: 18px; line-height: 1.25; overflow-wrap: anywhere; }
+.job-summary p { color: #384641; font-size: 14px; line-height: 1.45; overflow-wrap: anywhere; }
+.eyebrow { display: block; color: #65716d; font-size: 12px; font-weight: 650; margin-bottom: 5px; text-transform: uppercase; }
+.detail-block { display: grid; gap: 8px; padding-bottom: 14px; border-bottom: 1px solid #edf0ee; }
+.detail-block:last-child { border-bottom: 0; padding-bottom: 0; }
 .detail dl { display: grid; gap: 8px; margin: 0; }
 .detail dl div { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 12px; }
 dt { color: #65716d; font-size: 12px; }
 dd { margin: 0; overflow-wrap: anywhere; }
 .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
 .failure { margin-top: 12px; padding: 10px; border-radius: 6px; background: #f8e9e7; color: #8d281f; }
+.prompt-block pre { margin: 0; max-height: 280px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid #e3e7e5; border-radius: 6px; padding: 10px; background: #fbfcfa; color: #25302c; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 .events-panel { margin-top: 16px; }
 .event { display: grid; grid-template-columns: 120px 62px 92px minmax(0, 1fr); gap: 10px; align-items: start; padding: 10px 0; border-bottom: 1px solid #edf0ee; }
 .event:last-child { border-bottom: 0; }
@@ -252,7 +336,8 @@ dd { margin: 0; overflow-wrap: anywhere; }
 }
 
 function clientScript(): string {
-  return `const state = { value: window.__TETHERBOX_INITIAL_STATE__, selectedJobId: window.__TETHERBOX_INITIAL_STATE__.jobs[0]?.id };
+  return `const initialState = window.__TETHERBOX_INITIAL_STATE__;
+const state = { value: initialState, selectedJobId: selectedJobIdFromHash(initialState.jobs) || initialState.jobs[0]?.id };
 const els = {
   summary: document.getElementById("daemon-summary"),
   linear: document.getElementById("linear-status"),
@@ -269,10 +354,17 @@ const els = {
 els.token.value = sessionStorage.getItem("tetherbox.operatorToken") || "";
 els.token.addEventListener("input", () => sessionStorage.setItem("tetherbox.operatorToken", els.token.value));
 document.getElementById("refresh").addEventListener("click", refresh);
+window.addEventListener("hashchange", () => {
+  const selected = selectedJobIdFromHash(state.value.jobs);
+  if (selected && selected !== state.selectedJobId) {
+    state.selectedJobId = selected;
+    render();
+  }
+});
 document.addEventListener("click", async (event) => {
   const jobButton = event.target.closest("[data-job-id].job-card");
   if (jobButton) {
-    state.selectedJobId = jobButton.dataset.jobId;
+    selectJob(jobButton.dataset.jobId, true);
     render();
     return;
   }
@@ -286,13 +378,32 @@ async function refresh() {
     const response = await fetch("/api/status", { headers: { Accept: "application/json" } });
     if (!response.ok) throw new Error("status " + response.status);
     state.value = await response.json();
-    if (!state.value.jobs.some((job) => job.id === state.selectedJobId)) {
-      state.selectedJobId = state.value.jobs[0]?.id;
-    }
+    state.selectedJobId = selectedJobIdFromHash(state.value.jobs) || existingSelectedJobId(state.value.jobs) || state.value.jobs[0]?.id;
     render();
   } catch (error) {
     els.summary.textContent = "Daemon unavailable: " + (error instanceof Error ? error.message : "unknown error");
   }
+}
+function selectJob(jobId, updateHash) {
+  if (!jobId || !state.value.jobs.some((job) => job.id === jobId)) return;
+  state.selectedJobId = jobId;
+  if (updateHash) {
+    window.history.replaceState(null, "", "#" + encodeURIComponent(jobId));
+  }
+}
+function selectedJobIdFromHash(jobs) {
+  const rawHash = window.location.hash.slice(1);
+  if (!rawHash) return undefined;
+  let decoded;
+  try {
+    decoded = decodeURIComponent(rawHash);
+  } catch {
+    decoded = rawHash;
+  }
+  return jobs.some((job) => job.id === decoded) ? decoded : undefined;
+}
+function existingSelectedJobId(jobs) {
+  return jobs.some((job) => job.id === state.selectedJobId) ? state.selectedJobId : undefined;
 }
 async function runAction(jobId, action) {
   if (!jobId || !action) return;
@@ -322,26 +433,27 @@ function render() {
 }
 function jobCard(job, selected) {
   return '<button class="job-card' + (selected ? ' selected' : '') + '" type="button" data-job-id="' + escAttr(job.id) + '">' +
-    '<span class="job-row"><strong>' + esc(job.issueIdentifier || 'No issue') + '</strong><span class="status status-' + escAttr(job.status) + '">' + esc(job.status) + '</span></span>' +
+    '<span class="job-row"><strong>' + esc(job.issueIdentifier || 'No issue') + '</strong><span class="status status-' + escAttr(job.status) + '">' + esc(formatStatus(job.status)) + '</span></span>' +
     '<span class="job-title">' + esc(job.issueTitle || job.id) + '</span>' +
     '<span class="job-meta">' + esc(job.repo) + ' &middot; ' + esc(formatDate(job.updatedAt)) + '</span>' +
     '<span class="job-message">' + esc(job.lastMessage) + '</span></button>';
 }
 function jobDetail(job, events) {
   if (!job) return '<p class="muted">No job selected.</p>';
-  const rows = [
-    ['ID', job.id], ['Session', job.sessionId], ['Status', job.status], ['Repository', job.repo],
-    ['Issue', [job.issueIdentifier, job.issueTitle].filter(Boolean).join(' ') || 'none'],
-    ['Policy', job.policyRule + ' -> ' + job.policyDecision], ['Branch', job.branchName || 'none'],
-    ['Worktree', job.worktreePath || 'none'], ['Retry', (job.retryEligible ? 'eligible' : 'not eligible') + ' (' + job.retryCount + ')'],
-    ['Last', job.lastMessage],
-  ];
   const actions = actionsFor(job);
   const jobEvents = events.filter((event) => event.jobId === job.id).slice(0, 8);
   return '<div class="detail">' + (actions ? '<div class="actions">' + actions + '</div>' : '') +
-    '<dl>' + rows.map(([label, value]) => '<div><dt>' + esc(label) + '</dt><dd>' + esc(value) + '</dd></div>').join('') + '</dl>' +
+    '<section class="job-summary" aria-label="Selected job summary"><div><span class="eyebrow">' + esc(job.issueIdentifier || 'No issue') + '</span><h3>' + esc(job.issueTitle || job.id) + '</h3><p>' + esc(job.lastMessage) + '</p></div><span class="status status-' + escAttr(job.status) + '">' + esc(formatStatus(job.status)) + '</span></section>' +
     (job.failureReason ? '<p class="failure">' + esc(job.failureReason) + '</p>' : '') +
+    '<section class="detail-block"><h3>Identity</h3>' + fieldList([['Job ID', job.id], ['Session', job.sessionId], ['Repository', job.repo]]) + '</section>' +
+    '<section class="detail-block"><h3>Routing</h3>' + fieldList([['Branch', job.branchName || 'none'], ['Worktree', job.worktreePath || 'none']]) + '</section>' +
+    '<section class="detail-block"><h3>Policy</h3>' + fieldList([['Rule', job.policyRule], ['Decision', formatPolicyDecision(job.policyDecision)], ['Retry', formatRetry(job)]]) + '</section>' +
+    '<section class="detail-block"><h3>Timeline</h3>' + fieldList([['Created', formatDateTime(job.createdAt)], ['Started', job.startedAt ? formatDateTime(job.startedAt) : 'not started'], ['Updated', formatDateTime(job.updatedAt)], ['Finished', formatFinishedAt(job)]]) + '</section>' +
+    (job.prompt ? '<section class="detail-block prompt-block"><h3>Prompt</h3><pre>' + esc(truncateText(job.prompt, 1800)) + '</pre></section>' : '') +
     '<h3>Job Events</h3><div class="events compact">' + (jobEvents.length ? jobEvents.map(eventRow).join('') : '<p class="muted">No job events yet.</p>') + '</div></div>';
+}
+function fieldList(rows) {
+  return '<dl>' + rows.map(([label, value]) => '<div><dt>' + esc(label) + '</dt><dd>' + esc(value) + '</dd></div>').join('') + '</dl>';
 }
 function actionsFor(job) {
   const buttons = [];
@@ -369,9 +481,28 @@ function formatDate(value) {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString([], { month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit' });
 }
+function formatDateTime(value) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString([], { month: 'short', day: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+function formatFinishedAt(job) {
+  if (job.completedAt) return formatDateTime(job.completedAt);
+  if (job.canceledAt) return formatDateTime(job.canceledAt);
+  return 'not finished';
+}
+function formatPolicyDecision(value) { return String(value).replace(/_/g, ' '); }
+function formatRetry(job) {
+  const eligibility = job.retryEligible ? 'eligible' : 'not eligible';
+  return eligibility + ', ' + job.retryCount + ' ' + (job.retryCount === 1 ? 'attempt' : 'attempts');
+}
+function formatStatus(value) { return String(value).replace(/_/g, ' '); }
+function truncateText(value, maxLength) {
+  return value.length <= maxLength ? value : value.slice(0, maxLength - 3) + '...';
+}
 function esc(value) {
   return String(value).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 }
 function escAttr(value) { return esc(value); }
+render();
 setInterval(refresh, 2000);`;
 }

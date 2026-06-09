@@ -978,7 +978,7 @@ describe("Linear webhook handling", () => {
   });
 
   test("builds public status URLs when configured", () => {
-    expect(statusExternalUrl(config, "job/1")?.url).toBe("https://bridge.example/api/status#job%2F1");
+    expect(statusExternalUrl(config, "job/1")?.url).toBe("https://bridge.example/#job%2F1");
     expect(statusExternalUrl({ ...config, server: { host: "127.0.0.1", port: 8787 } }, "job/1")).toBeUndefined();
   });
 

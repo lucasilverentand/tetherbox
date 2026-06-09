@@ -819,7 +819,7 @@ export function statusExternalUrl(config: BridgeConfig, jobId: string): LinearEx
 
   return {
     label: "Tetherbox job",
-    url: `${config.server.publicUrl.replace(/\/$/, "")}/api/status#${encodeURIComponent(jobId)}`,
+    url: `${config.server.publicUrl.replace(/\/$/, "")}/#${encodeURIComponent(jobId)}`,
   };
 }
 

@@ -318,7 +318,7 @@ describe("runJob", () => {
               id: "session-1",
               input: {
                 addedExternalUrls: [
-                  { label: "Tetherbox job", url: "https://bridge.example/api/status#job-2" },
+                  { label: "Tetherbox job", url: "https://bridge.example/#job-2" },
                   { label: "GitHub pull request", url: "https://github.com/lucasilverentand/example/pull/12" },
                 ],
               },

@@ -29,13 +29,21 @@ describe("server webhook handling", () => {
       expect(html).toContain("Queue");
       expect(html).toContain("Jobs");
       expect(html).toContain("Job Detail");
+      expect(html).toContain("Identity");
+      expect(html).toContain("Routing");
+      expect(html).toContain("Policy");
+      expect(html).toContain("Timeline");
+      expect(html).toContain("Prompt");
       expect(html).toContain("Recent Events");
       expect(html).toContain("OSS-1");
       expect(html).toContain("Fix this");
       expect(html).toContain("lucasilverentand/web");
       expect(html).toContain("Codex is editing files");
+      expect(html).toContain("not finished");
       expect(html).toContain("Started Codex");
       expect(html).toContain("window.__TETHERBOX_INITIAL_STATE__");
+      expect(html).toContain("selectedJobIdFromHash");
+      expect(html).toContain("history.replaceState");
     } finally {
       state.close();
     }
@@ -214,7 +222,7 @@ describe("server webhook handling", () => {
       expect(sessionUpdates[0]).toMatchObject({
         addedExternalUrls: [{
           label: "Tetherbox job",
-          url: expect.stringMatching(/^https:\/\/bridge\.example\/api\/status#sess_1-[a-f0-9]{8}$/),
+          url: expect.stringMatching(/^https:\/\/bridge\.example\/#sess_1-[a-f0-9]{8}$/),
         }],
       });
       expect(sessionUpdates[0]).not.toHaveProperty("externalUrls");
