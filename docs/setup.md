@@ -96,6 +96,8 @@ Set Linear's webhook signing secret in the env var named by `linear.webhookSecre
 Tetherbox verifies `Linear-Signature` with HMAC-SHA256 over the raw request body. Invalid signatures are rejected before parsing JSON.
 Agent Session webhooks can queue or steer local Codex jobs. Inbox Notification webhooks record local audit events for direct app-user involvement; mention, comment, assignment, and reaction notifications are copied into matching active job timelines, while `issueUnassignedFromYou` and terminal `issueStatusChanged` notifications cancel matching active local jobs. Permission-change webhooks only record local audit events, and OAuth app revocation webhooks remove the matching organization-scoped app actor token so the daemon will require reinstall before it can post Linear activity or update delegated issues for that organization again.
 
+Native Linear webhook delivery is still the preferred intake path because it gives Tetherbox exact delivery IDs, retry behavior, and signed payload evidence. When the Linear app token can read Agent Sessions but the app's webhook delivery settings are not inspectable from the daemon, enable `linear.agentSessionPollIntervalMs` as a fallback. Polling should be treated as a delivery safety net, not as proof that the native webhook is configured correctly; verify the native path from Linear's app administration view and keep `/webhooks/linear` limited to signed POST traffic.
+
 ## Tunnel Options
 
 Linear must reach `/webhooks/linear` over HTTPS. Common options are:
