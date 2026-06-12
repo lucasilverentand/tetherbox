@@ -251,26 +251,27 @@ async function createCommit(
   const signingKeyPath = expandHome(config.git?.signingKeyPath);
 
   if (!signingKeyPath) {
-    await runSignedCommitWithGitConfig(job, worktree, runner);
+    await runSignedCommitWithGitConfig(config, job, worktree, runner);
     return;
   }
 
   if (!(await fileExists(runner, signingKeyPath))) {
     warnings.push(`Git signing key not found at ${signingKeyPath}; trying Git's configured signing key.`);
-    await runSignedCommitWithGitConfig(job, worktree, runner);
+    await runSignedCommitWithGitConfig(config, job, worktree, runner);
     return;
   }
 
   try {
-    await runSignedCommitWithKey(job, worktree, runner, signingKeyPath);
+    await runSignedCommitWithKey(config, job, worktree, runner, signingKeyPath);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     warnings.push(`Signed commit with ${signingKeyPath} failed; trying Git's configured signing key. ${message}`);
-    await runSignedCommitWithGitConfig(job, worktree, runner);
+    await runSignedCommitWithGitConfig(config, job, worktree, runner);
   }
 }
 
 function runSignedCommitWithKey(
+  config: BridgeConfig,
   job: RoutedJob,
   worktree: WorktreeInfo,
   runner: CommandRunner,
@@ -278,17 +279,36 @@ function runSignedCommitWithKey(
 ): Promise<CommandResult> {
   return runner.run(
     "git",
-    ["-c", "gpg.format=ssh", "-c", `user.signingKey=${signingKeyPath}`, ...commitArgs(job, true)],
+    [
+      "-c",
+      "gpg.format=ssh",
+      "-c",
+      `user.signingKey=${signingKeyPath}`,
+      ...gitAuthorConfigArgs(config),
+      ...commitArgs(job, true),
+    ],
     worktree.path,
   );
 }
 
 function runSignedCommitWithGitConfig(
+  config: BridgeConfig,
   job: RoutedJob,
   worktree: WorktreeInfo,
   runner: CommandRunner,
 ): Promise<CommandResult> {
-  return runner.run("git", commitArgs(job, true), worktree.path);
+  return runner.run("git", [...gitAuthorConfigArgs(config), ...commitArgs(job, true)], worktree.path);
+}
+
+function gitAuthorConfigArgs(config: BridgeConfig): string[] {
+  return [
+    ...gitConfigArg("user.name", config.git?.authorName ?? "Tetherbox"),
+    ...gitConfigArg("user.email", config.git?.authorEmail ?? "tetherbox@users.noreply.github.com"),
+  ];
+}
+
+function gitConfigArg(key: string, value: string | undefined): string[] {
+  return value ? ["-c", `${key}=${value}`] : [];
 }
 
 function commitArgs(job: RoutedJob, sign = false): string[] {

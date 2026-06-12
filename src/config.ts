@@ -38,6 +38,9 @@ export async function loadConfig(path: string): Promise<BridgeConfig> {
     },
     git: {
       signingKeyPath: parsed.git?.signingKeyPath ?? "~/.ssh/codex_signing_key",
+      githubAuthUrl: parsed.git?.githubAuthUrl,
+      authorName: parsed.git?.authorName ?? "Tetherbox",
+      authorEmail: parsed.git?.authorEmail ?? "tetherbox@users.noreply.github.com",
     },
     policies: parsed.policies ?? [],
   } as BridgeConfig;

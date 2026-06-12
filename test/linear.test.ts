@@ -1538,6 +1538,7 @@ describe("Linear webhook handling", () => {
       server: { host: "127.0.0.1", port: 8787 },
       linear: { webhookSecretEnv: "LINEAR_WEBHOOK_SECRET" },
       codex: { bin: "codex", sandbox: "workspace-write" },
+      git: { githubAuthUrl: "https://github.example.test/device" },
       repos: [{ linearTeams: ["OSS"], github: "lucasilverentand/tetherbox", localPath: "/tmp/tetherbox", defaultBase: "main" }],
     }));
 
@@ -1545,6 +1546,9 @@ describe("Linear webhook handling", () => {
 
     expect(loaded.linear.apiTimeoutMs).toBe(8_000);
     expect(loaded.linear.agentActivityHistoryLimit).toBe(100);
+    expect(loaded.git?.githubAuthUrl).toBe("https://github.example.test/device");
+    expect(loaded.git?.authorName).toBe("Tetherbox");
+    expect(loaded.git?.authorEmail).toBe("tetherbox@users.noreply.github.com");
   });
 
   test("times out stalled Linear GraphQL calls", async () => {
