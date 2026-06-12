@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { access } from "node:fs/promises";
 import { homedir } from "node:os";
+import { setTimeout as sleep } from "node:timers/promises";
 import type { BridgeConfig, RoutedJob } from "./types";
 import type { WorktreeInfo } from "./worktree-manager";
 
@@ -21,6 +22,12 @@ export interface PullRequestCheckResult {
   status: "passed" | "failed" | "no_checks";
   summary: string;
   output: string;
+}
+
+export interface PullRequestCheckWatchOptions {
+  noChecksRetries?: number;
+  noChecksRetryDelayMs?: number;
+  sleep?: (ms: number) => Promise<void>;
 }
 
 export interface CommandResult {
@@ -192,6 +199,32 @@ export async function watchPullRequestChecks(
   prNumber: number,
   cwd: string,
   runner: CommandRunner = new ProcessCommandRunner(),
+  options: PullRequestCheckWatchOptions = {},
+): Promise<PullRequestCheckResult> {
+  const noChecksRetries = options.noChecksRetries ?? 4;
+  const noChecksRetryDelayMs = options.noChecksRetryDelayMs ?? 15_000;
+  const wait = options.sleep ?? sleep;
+
+  for (let attempt = 0; attempt <= noChecksRetries; attempt += 1) {
+    const checks = await runPullRequestCheckWatch(repo, prNumber, cwd, runner);
+    if (checks.status !== "no_checks" || attempt === noChecksRetries) {
+      return checks;
+    }
+    await wait(noChecksRetryDelayMs);
+  }
+
+  return {
+    status: "no_checks",
+    summary: "No GitHub checks were reported for the pull request.",
+    output: "",
+  };
+}
+
+async function runPullRequestCheckWatch(
+  repo: string,
+  prNumber: number,
+  cwd: string,
+  runner: CommandRunner,
 ): Promise<PullRequestCheckResult> {
   try {
     const result = await runner.run("gh", ["pr", "checks", String(prNumber), "--repo", repo, "--watch"], cwd);

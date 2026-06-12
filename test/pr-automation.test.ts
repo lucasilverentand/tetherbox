@@ -274,11 +274,36 @@ describe("pull request automation", () => {
     ]);
   });
 
+  test("retries when GitHub has not attached pull request checks yet", async () => {
+    const runner = new FakeRunner([{ stdout: "build\tpass\t0m10s\thttps://example.test\n", stderr: "" }]);
+    runner.failRunMessages.push("no checks reported on the 'feature' branch");
+    const delays: number[] = [];
+
+    const result = await watchPullRequestChecks("lucasilverentand/example", 42, "/tmp/worktree", runner, {
+      noChecksRetries: 2,
+      noChecksRetryDelayMs: 5,
+      sleep: async (ms) => {
+        delays.push(ms);
+      },
+    });
+
+    expect(result.status).toBe("passed");
+    expect(delays).toEqual([5]);
+    expect(runner.commands.filter((command) => command.command === "gh")).toHaveLength(2);
+  });
+
   test("records absent pull request checks from gh errors", async () => {
     const runner = new FakeRunner([]);
-    runner.failRun = "no checks reported on the 'feature' branch";
+    runner.failRunMessages.push(
+      "no checks reported on the 'feature' branch",
+      "no checks reported on the 'feature' branch",
+    );
 
-    const result = await watchPullRequestChecks("lucasilverentand/example", 42, "/tmp/worktree", runner);
+    const result = await watchPullRequestChecks("lucasilverentand/example", 42, "/tmp/worktree", runner, {
+      noChecksRetries: 1,
+      noChecksRetryDelayMs: 5,
+      sleep: async () => {},
+    });
 
     expect(result).toMatchObject({
       status: "no_checks",
@@ -336,6 +361,7 @@ class FakeRunner implements CommandRunner {
   > = [];
   failShell = false;
   failRun?: string;
+  failRunMessages: string[] = [];
   failRunCommand?: string;
   failRunArgsIncludes?: string;
   failSignedCommit = false;
@@ -352,6 +378,10 @@ class FakeRunner implements CommandRunner {
         throw new Error("no pull request found");
       }
       return { stdout: JSON.stringify(this.existingPullRequest), stderr: "" };
+    }
+    const queuedFailure = this.failRunMessages.shift();
+    if (queuedFailure) {
+      throw new Error(queuedFailure);
     }
     if (this.failSignedCommit && command === "git" && args.includes("commit") && args.includes("-S")) {
       this.failSignedCommit = false;
