@@ -169,7 +169,7 @@ function linearCreatedEvent(sessionId: string, labels: string[]): unknown {
         description: "Exercise the daemon path with fake Linear and fake Codex.",
         teamKey: "OSS",
         labels,
-        url: "https://linear.app/seventwo/issue/OSS-244/create-end-to-end-local-integration-test-harness",
+        url: "https://linear.app/example/issue/OSS-244/create-end-to-end-local-integration-test-harness",
       },
     },
   };

@@ -73,7 +73,8 @@ describe("StateStore", () => {
     const store = new StateStore(path);
     await store.load();
     await store.createJob(jobFixture());
-    await store.addEvent("warn", "Linear returned access_token=lin_abcdefghijklmnopqrstuvwxyz", "job-1", "linear");
+    const fakeLinearToken = `lin_${"abcdefghijklmnopqrstuvwxyz"}`;
+    await store.addEvent("warn", `Linear returned access_token=${fakeLinearToken}`, "job-1", "linear");
 
     const event = store.snapshot().events.find((candidate) => candidate.source === "linear");
     store.close();
@@ -367,7 +368,8 @@ describe("StateStore", () => {
     const path = await statePath();
     const store = new StateStore(path);
     await store.load();
-    await store.createJob({ ...jobFixture(), prompt: "Fix it with access_token=lin_abcdefghijklmnopqrstuvwxyz" });
+    const fakeLinearToken = `lin_${"abcdefghijklmnopqrstuvwxyz"}`;
+    await store.createJob({ ...jobFixture(), prompt: `Fix it with access_token=${fakeLinearToken}` });
 
     const snapshot = store.snapshot();
     const internalJob = store.getJob("job-1");
@@ -384,7 +386,7 @@ describe("StateStore", () => {
       status: "queued",
       prompt: "Fix it with access_token=[REDACTED]",
     });
-    expect(internalJob?.prompt).toBe("Fix it with access_token=lin_abcdefghijklmnopqrstuvwxyz");
+    expect(internalJob?.prompt).toBe(`Fix it with access_token=${fakeLinearToken}`);
   });
 });
 

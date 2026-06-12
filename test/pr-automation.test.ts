@@ -139,8 +139,8 @@ describe("pull request automation", () => {
         ...signedConfig,
         git: {
           signingKeyPath: "/tmp/codex_signing_key",
-          authorName: "Luca Silverentand",
-          authorEmail: "luca@seventwo.studio",
+          authorName: "Operator Example",
+          authorEmail: "operator@example.com",
           coAuthorName: "Codex",
           coAuthorEmail: "codex@openai.com",
         },
@@ -155,8 +155,8 @@ describe("pull request automation", () => {
     );
     expect(commit).toMatchObject({
       args: expect.arrayContaining([
-        "user.name=Luca Silverentand",
-        "user.email=luca@seventwo.studio",
+        "user.name=Operator Example",
+        "user.email=operator@example.com",
         "Co-authored-by: Codex <codex@openai.com>",
       ]),
     });
@@ -372,7 +372,7 @@ const job: RoutedJob = {
   issue: {
     identifier: "OSS-1",
     title: "Fix checkout",
-    url: "https://linear.app/seventwo/issue/OSS-1/fix-checkout",
+    url: "https://linear.app/example/issue/OSS-1/fix-checkout",
     labels: [],
   },
   repo: {

@@ -11,11 +11,13 @@ describe("redaction", () => {
   });
 
   test("redacts nested values by sensitive key", () => {
+    const fakeGitHubToken = `ghp_${"abcdefghijklmnopqrstuvwxyz123456"}`;
+    const fakeLinearToken = `lin_${"abcdefghijklmnopqrstuvwxyz123456"}`;
     const value = redactValue({
       content: {
-        body: "Use ghp_abcdefghijklmnopqrstuvwxyz123456",
+        body: `Use ${fakeGitHubToken}`,
       },
-      accessToken: "lin_abcdefghijklmnopqrstuvwxyz123456",
+      accessToken: fakeLinearToken,
     });
 
     expect(value).toEqual({

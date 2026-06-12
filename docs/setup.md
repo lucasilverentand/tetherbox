@@ -201,8 +201,8 @@ Tetherbox creates commits from the isolated job worktree after configured valida
   "git": {
     "signingKeyPath": "~/.ssh/codex_signing_key",
     "githubAuthUrl": "https://github.com/login/device",
-    "authorName": "Luca Silverentand",
-    "authorEmail": "luca@seventwo.studio",
+    "authorName": "Your Name",
+    "authorEmail": "you@example.com",
     "coAuthorName": "Codex",
     "coAuthorEmail": "codex@openai.com"
   }

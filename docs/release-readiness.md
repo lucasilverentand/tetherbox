@@ -2,7 +2,7 @@
 
 Target release: `v0.1.0`
 
-Linear issue: [OSS-243](https://linear.app/seventwo/issue/OSS-243/cut-first-single-host-mvp-release)
+Linear issue: [OSS-243](https://linear.app/example/issue/OSS-243/cut-first-single-host-mvp-release)
 
 ## Current Status
 

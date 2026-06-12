@@ -124,7 +124,7 @@ describe("Linear webhook handling", () => {
               id: "issue-1",
               identifier: "OSS-256",
               title: "Handle inbox notification webhooks",
-              url: "https://linear.app/seventwo/issue/OSS-256",
+              url: "https://linear.app/example/issue/OSS-256",
               state: {
                 name: "Done",
                 type: "completed",
@@ -143,7 +143,7 @@ describe("Linear webhook handling", () => {
         id: "issue-1",
         identifier: "OSS-256",
         title: "Handle inbox notification webhooks",
-        url: "https://linear.app/seventwo/issue/OSS-256",
+        url: "https://linear.app/example/issue/OSS-256",
         statusName: "Done",
         statusType: "completed",
       },
@@ -169,7 +169,7 @@ describe("Linear webhook handling", () => {
             comment: {
               id: "comment-1",
               body: "Can you include this detail in the implementation?",
-              url: "https://linear.app/seventwo/comment/comment-1",
+              url: "https://linear.app/example/comment/comment-1",
               user: { name: "Luca" },
             },
           },
@@ -189,7 +189,7 @@ describe("Linear webhook handling", () => {
       comment: {
         id: "comment-1",
         body: "Can you include this detail in the implementation?",
-        url: "https://linear.app/seventwo/comment/comment-1",
+        url: "https://linear.app/example/comment/comment-1",
         authorName: "Luca",
       },
     });
@@ -352,7 +352,7 @@ describe("Linear webhook handling", () => {
             description: "The daemon drops comments and guidance.",
             teamKey: "OSS",
             labels: ["Developer Tools", "Feature"],
-            url: "https://linear.app/seventwo/issue/OSS-253/example",
+            url: "https://linear.app/example/issue/OSS-253/example",
           },
           comment: {
             body: "Start with the webhook path.",
@@ -391,7 +391,7 @@ describe("Linear webhook handling", () => {
             labels: ["Developer Tools"],
             project: {
               name: "Build Tetherbox",
-              url: "https://linear.app/seventwo/project/build-tetherbox",
+              url: "https://linear.app/example/project/build-tetherbox",
             },
             initiative: {
               name: "Local Linear coding agent",
@@ -405,7 +405,7 @@ describe("Linear webhook handling", () => {
             parent: {
               identifier: "OSS-220",
               title: "Tetherbox M1",
-              url: "https://linear.app/seventwo/issue/OSS-220",
+              url: "https://linear.app/example/issue/OSS-220",
             },
             relatedIssues: [
               {
@@ -416,7 +416,7 @@ describe("Linear webhook handling", () => {
             customerRequests: [
               {
                 title: "Need local agent assignment",
-                url: "https://linear.app/seventwo/customer-request/cr-1",
+                url: "https://linear.app/example/customer-request/cr-1",
                 customer: {
                   name: "Seventwo",
                 },
@@ -425,7 +425,7 @@ describe("Linear webhook handling", () => {
             documents: [
               {
                 title: "Agent rollout notes",
-                url: "https://linear.app/seventwo/document/agent-rollout",
+                url: "https://linear.app/example/document/agent-rollout",
               },
             ],
           },
@@ -923,12 +923,13 @@ describe("Linear webhook handling", () => {
   test("redacts likely secrets before posting agent activities", async () => {
     const calls: unknown[] = [];
     const restore = mockFetch(calls);
+    const fakeLinearToken = `lin_${"abcdefghijklmnopqrstuvwxyz"}`;
     process.env.LINEAR_API_KEY = "lin_test";
 
     try {
       await postLinearActivity(config, "sess_1", {
         type: "error",
-        body: "Command failed with access_token=lin_abcdefghijklmnopqrstuvwxyz and Bearer abcdefghijklmnop",
+        body: `Command failed with access_token=${fakeLinearToken} and Bearer abcdefghijklmnop`,
       });
     } finally {
       restore();

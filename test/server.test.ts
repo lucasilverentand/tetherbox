@@ -115,7 +115,7 @@ describe("server webhook handling", () => {
           description: "The checkout flow is broken.",
           teamKey: "WEB",
           labels: ["Bug"],
-          url: "https://linear.app/seventwo/issue/OSS-1/fix-this",
+          url: "https://linear.app/example/issue/OSS-1/fix-this",
         },
         comment: {
           body: "The latest repro is in staging.",
@@ -663,7 +663,7 @@ describe("server webhook handling", () => {
           id: "issue-1",
           identifier: "OSS-256",
           title: "Handle notification webhooks",
-          url: "https://linear.app/seventwo/issue/OSS-256",
+          url: "https://linear.app/example/issue/OSS-256",
         },
       },
     });
@@ -720,7 +720,7 @@ describe("server webhook handling", () => {
           id: "issue-1",
           identifier: "WEB-123",
           title: "Run delegated agent work",
-          url: "https://linear.app/seventwo/issue/WEB-123",
+          url: "https://linear.app/example/issue/WEB-123",
         },
       },
     });
@@ -750,13 +750,13 @@ describe("server webhook handling", () => {
               id: "sess_issue_1",
               slugId: "slug-1",
               status: "active",
-              url: "https://linear.app/seventwo/issue/WEB-123#agent-session-sess_issue_1",
+              url: "https://linear.app/example/issue/WEB-123#agent-session-sess_issue_1",
               issue: {
                 id: "issue-1",
                 identifier: "WEB-123",
                 title: "Run delegated agent work",
                 description: "Use the web repository.",
-                url: "https://linear.app/seventwo/issue/WEB-123",
+                url: "https://linear.app/example/issue/WEB-123",
                 team: { id: "team-web", key: "WEB" },
                 labels: { nodes: [{ name: "Delegated" }] },
               },
@@ -855,13 +855,13 @@ describe("server webhook handling", () => {
                 id: "sess_poll_1",
                 slugId: "slug-poll-1",
                 status: "active",
-                url: "https://linear.app/seventwo/issue/WEB-124#agent-session-sess_poll_1",
+                url: "https://linear.app/example/issue/WEB-124#agent-session-sess_poll_1",
                 issue: {
                   id: "issue-poll-1",
                   identifier: "WEB-124",
                   title: "Poll active agent sessions",
                   description: "Use the web repository.",
-                  url: "https://linear.app/seventwo/issue/WEB-124",
+                  url: "https://linear.app/example/issue/WEB-124",
                   team: { id: "team-web", key: "WEB" },
                   labels: { nodes: [{ name: "Delegated" }] },
                 },
@@ -988,7 +988,7 @@ describe("server webhook handling", () => {
         comment: {
           id: "comment-1",
           body: "Please include the latest reproduction notes.",
-          url: "https://linear.app/seventwo/comment/comment-1",
+          url: "https://linear.app/example/comment/comment-1",
           user: { name: "Luca" },
         },
       },
@@ -1133,7 +1133,7 @@ describe("server webhook handling", () => {
           id: "issue-1",
           identifier: "OSS-278",
           title: "Preserve assignment context",
-          url: "https://linear.app/seventwo/issue/OSS-278",
+          url: "https://linear.app/example/issue/OSS-278",
         },
       },
     });
@@ -2464,7 +2464,7 @@ describe("server webhook handling", () => {
         ...config,
         repos: [
           { ...config.repos[0]!, github: "lucasilverentand/api" },
-          { ...config.repos[1]!, github: "seventwo/api" },
+          { ...config.repos[1]!, github: "example/api" },
         ],
       },
       state,
@@ -2502,7 +2502,7 @@ describe("server webhook handling", () => {
           signalMetadata: expect.objectContaining({
             options: [
               { label: "lucasilverentand/api", value: "lucasilverentand/api" },
-              { label: "seventwo/api", value: "seventwo/api" },
+              { label: "example/api", value: "example/api" },
             ],
           }),
         }),
