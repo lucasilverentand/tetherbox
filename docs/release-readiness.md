@@ -36,6 +36,8 @@ The stack was checked as clean through PR #23. GitHub currently reports no check
 
 ## Acceptance Evidence
 
+June 12, 2026 post-deploy smoke: OSS-292 ran a throwaway Bun website outside the repository at `/tmp/tetherbox-oss-292-fake-site`; `bun install`, `bun run lint`, `bun test`, and `bun run build` passed there, and `bun run check` passed in this repository.
+
 | Requirement | Evidence | Status |
 | --- | --- | --- |
 | Linear delegation can run local Codex on one host | `test/integration-harness.test.ts` signs a fake Linear webhook, runs the real request handler and queue, starts a fake `codex app-server`, prepares a real Git worktree, and completes a job. | Ready in stack |
