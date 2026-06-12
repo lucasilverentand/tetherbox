@@ -27,6 +27,12 @@ export function branchNameForIssue(issue: LinearIssueContext): string {
   return branchName;
 }
 
+export function branchNameForJob(job: RoutedJob): string {
+  const base = branchNameForIssue(job.issue);
+  const suffix = branchSuffixForJob(job.id);
+  return `${base}-${suffix}`;
+}
+
 export function worktreePathForJob(config: BridgeConfig, job: RoutedJob): string {
   return join(worktreeRoot(config), safePathSegment(job.id));
 }
@@ -40,7 +46,7 @@ export function daemonStateDirectory(config: BridgeConfig): string {
 }
 
 export async function prepareWorktree(config: BridgeConfig, job: RoutedJob): Promise<WorktreeInfo> {
-  const branchName = branchNameForIssue(job.issue);
+  const branchName = branchNameForJob(job);
   const path = worktreePathForJob(config, job);
 
   await mkdir(dirname(path), { recursive: true });
@@ -102,6 +108,11 @@ function slugify(value: string): string {
 
 function safePathSegment(value: string): string {
   return slugify(value).slice(0, 80);
+}
+
+function branchSuffixForJob(jobId: string): string {
+  const safeId = safePathSegment(jobId);
+  return safeId.split("-").filter(Boolean).at(-1)?.slice(0, 12) || "job";
 }
 
 function isPathInside(root: string, path: string): boolean {
