@@ -38,7 +38,9 @@
     "signingKeyPath": "~/.ssh/codex_signing_key",
     "githubAuthUrl": "https://github.com/login/device",
     "authorName": "Tetherbox",
-    "authorEmail": "tetherbox@users.noreply.github.com"
+    "authorEmail": "tetherbox@users.noreply.github.com",
+    "coAuthorName": "Codex",
+    "coAuthorEmail": "codex@openai.com"
   },
   "repos": [
     {

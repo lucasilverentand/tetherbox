@@ -201,13 +201,15 @@ Tetherbox creates commits from the isolated job worktree after configured valida
   "git": {
     "signingKeyPath": "~/.ssh/codex_signing_key",
     "githubAuthUrl": "https://github.com/login/device",
-    "authorName": "Tetherbox",
-    "authorEmail": "tetherbox@users.noreply.github.com"
+    "authorName": "Luca Silverentand",
+    "authorEmail": "luca@seventwo.studio",
+    "coAuthorName": "Codex",
+    "coAuthorEmail": "codex@openai.com"
   }
 }
 ```
 
-When the key exists, Tetherbox runs `git -c gpg.format=ssh -c user.signingKey=<path> -c user.name=<authorName> -c user.email=<authorEmail> commit -S ...` and includes `Co-authored-by: Codex <codex@openai.com>`. If the configured key is missing or signing with that key fails, Tetherbox records a warning and tries a signed commit with the worktree's Git signing config and the configured author identity. If Git still cannot create a signed commit, the job fails before pushing or opening a pull request.
+When the key exists, Tetherbox runs `git -c gpg.format=ssh -c user.signingKey=<path> -c user.name=<authorName> -c user.email=<authorEmail> commit -S ...` and includes `Co-authored-by: <coAuthorName> <<coAuthorEmail>>`. Set `authorName` and `authorEmail` to the GitHub-verified identity that should own the commit, and keep the co-author fields for the agent attribution. If the configured key is missing or signing with that key fails, Tetherbox records a warning and tries a signed commit with the worktree's Git signing config and the configured author identity. If Git still cannot create a signed commit, the job fails before pushing or opening a pull request.
 
 ## Service Install
 

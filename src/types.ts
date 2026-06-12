@@ -46,6 +46,8 @@ export interface BridgeConfig {
     githubAuthUrl?: string;
     authorName?: string;
     authorEmail?: string;
+    coAuthorName?: string;
+    coAuthorEmail?: string;
   };
   repos: RepoMapping[];
   policies: PolicyRule[];

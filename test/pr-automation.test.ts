@@ -122,6 +122,46 @@ describe("pull request automation", () => {
     });
   });
 
+  test("uses configured commit author and co-author identities", async () => {
+    const runner = new FakeRunner([
+      { stdout: " M src/app.ts\n", stderr: "" },
+      { stdout: "", stderr: "" },
+      { stdout: "", stderr: "" },
+      { stdout: "", stderr: "" },
+      { stdout: "", stderr: "" },
+      { stdout: "https://github.com/lucasilverentand/example/pull/42\n", stderr: "" },
+    ]);
+    runner.shellResults.push({ stdout: "tests passed\n", stderr: "" });
+    runner.existingFiles.add("/tmp/codex_signing_key");
+
+    await finalizeSuccessfulRun(
+      {
+        ...signedConfig,
+        git: {
+          signingKeyPath: "/tmp/codex_signing_key",
+          authorName: "Luca Silverentand",
+          authorEmail: "luca@seventwo.studio",
+          coAuthorName: "Codex",
+          coAuthorEmail: "codex@openai.com",
+        },
+      },
+      job,
+      worktree,
+      runner,
+    );
+
+    const commit = runner.commands.find(
+      (command) => command.kind === "run" && command.command === "git" && command.args.includes("commit"),
+    );
+    expect(commit).toMatchObject({
+      args: expect.arrayContaining([
+        "user.name=Luca Silverentand",
+        "user.email=luca@seventwo.studio",
+        "Co-authored-by: Codex <codex@openai.com>",
+      ]),
+    });
+  });
+
   test("updates an existing PR for the branch instead of creating a duplicate", async () => {
     const runner = new FakeRunner([
       { stdout: " M src/app.ts\n", stderr: "" },

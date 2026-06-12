@@ -43,6 +43,8 @@ export async function loadConfig(path: string): Promise<BridgeConfig> {
       githubAuthUrl: parsed.git?.githubAuthUrl,
       authorName: parsed.git?.authorName ?? "Tetherbox",
       authorEmail: parsed.git?.authorEmail ?? "tetherbox@users.noreply.github.com",
+      coAuthorName: parsed.git?.coAuthorName ?? "Codex",
+      coAuthorEmail: parsed.git?.coAuthorEmail ?? "codex@openai.com",
     },
     policies: parsed.policies ?? [],
   } as BridgeConfig;
