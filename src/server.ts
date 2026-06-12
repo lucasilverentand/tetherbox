@@ -15,6 +15,7 @@ import {
   completeLinearOAuthCallback,
   createLinearAgentSessionOnIssue,
   isStopSignal,
+  listLinearAgentSessions,
   listLinearAgentSessionActivities,
   parseApprovalDecision,
   parseLinearAgentEvent,
@@ -45,6 +46,7 @@ export async function serve(configPath: string): Promise<void> {
     state,
     execute: (job, signal) => runJob(config, job, state, { signal }),
   });
+  const stopLinearAgentSessionPolling = startLinearAgentSessionPolling(config, state, queue);
 
   const server = Bun.serve({
     hostname: config.server.host,
@@ -54,6 +56,7 @@ export async function serve(configPath: string): Promise<void> {
 
   const shutdown = async () => {
     console.log("tetherbox shutting down");
+    stopLinearAgentSessionPolling?.();
     await queue.shutdown({ graceMs: config.queue?.shutdownGraceMs ?? 30_000 });
     state.close();
     server.stop(true);
@@ -66,6 +69,125 @@ export async function serve(configPath: string): Promise<void> {
   });
 
   console.log(`tetherbox listening on http://${server.hostname}:${server.port}`);
+}
+
+function startLinearAgentSessionPolling(
+  config: BridgeConfig,
+  state: StateStore,
+  queue: Pick<JobQueue, "cancel" | "enqueue">,
+): (() => void) | undefined {
+  const intervalMs = config.linear.agentSessionPollIntervalMs ?? 0;
+  if (intervalMs <= 0) {
+    return undefined;
+  }
+
+  let stopped = false;
+  let running = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const poll = async () => {
+    if (stopped || running) {
+      return;
+    }
+    running = true;
+    try {
+      const result = await pollLinearAgentSessionsOnce({ config, state, queue });
+      if (result.started > 0) {
+        await state.addEvent("info", `Linear agent-session poll queued ${result.started} session(s)`, undefined, "linear");
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Linear agent-session poll failed";
+      await state.addEvent("warn", message, undefined, "linear");
+    } finally {
+      running = false;
+      if (!stopped) {
+        timer = setTimeout(() => {
+          void poll();
+        }, intervalMs);
+      }
+    }
+  };
+
+  timer = setTimeout(() => {
+    void poll();
+  }, intervalMs);
+  return () => {
+    stopped = true;
+    if (timer) {
+      clearTimeout(timer);
+    }
+  };
+}
+
+export async function pollLinearAgentSessionsOnce(options: {
+  config: BridgeConfig;
+  state: StateStore;
+  queue: Pick<JobQueue, "cancel" | "enqueue">;
+}): Promise<{ inspected: number; started: number; skipped: number }> {
+  const { config, state, queue } = options;
+  const pollFirst = config.linear.agentSessionPollFirst ?? 20;
+  const installations = dedupeLinearInstallations(state.listLinearInstallations());
+  let inspected = 0;
+  let started = 0;
+  let skipped = 0;
+
+  for (const installation of installations) {
+    const sessions = await listLinearAgentSessions(config, state, installation.workspaceId, pollFirst);
+    for (const session of sessions) {
+      inspected += 1;
+      if (session.status !== "active" || !session.issue) {
+        skipped += 1;
+        continue;
+      }
+
+      const deliveryId = linearAgentSessionPollDeliveryId(session.id);
+      if (state.getProcessedWebhook(deliveryId) || state.getActiveJobForSession(session.id)) {
+        skipped += 1;
+        continue;
+      }
+
+      const jobId = createJobId(session.id);
+      const event: ReturnType<typeof parseLinearAgentEvent> = {
+        action: "created",
+        organizationId: installation.workspaceId,
+        agentSession: {
+          id: session.id,
+          issue: session.issue,
+        },
+      };
+      await intakeLinearWebhook({
+        config,
+        state,
+        queue,
+        event,
+        sessionId: session.id,
+        jobId,
+        linearWorkspaceId: installation.workspaceId,
+        deliveryId,
+      });
+      started += 1;
+    }
+  }
+
+  return { inspected, started, skipped };
+}
+
+function linearAgentSessionPollDeliveryId(sessionId: string): string {
+  return `linear-agent-session-poll:${sessionId}`;
+}
+
+function dedupeLinearInstallations(
+  installations: ReturnType<StateStore["listLinearInstallations"]>,
+): ReturnType<StateStore["listLinearInstallations"]> {
+  const seenTokens = new Set<string>();
+  const deduped: ReturnType<StateStore["listLinearInstallations"]> = [];
+  for (const installation of installations) {
+    if (seenTokens.has(installation.accessToken)) {
+      continue;
+    }
+    seenTokens.add(installation.accessToken);
+    deduped.push(installation);
+  }
+  return deduped;
 }
 
 export interface RequestHandlerOptions {

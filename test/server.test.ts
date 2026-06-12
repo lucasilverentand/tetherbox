@@ -3,7 +3,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
-import { createRequestHandler } from "../src/server";
+import { createRequestHandler, pollLinearAgentSessionsOnce } from "../src/server";
 import { StateStore } from "../src/state-store";
 import type { BridgeConfig, DaemonState, RoutedJob } from "../src/types";
 
@@ -826,6 +826,130 @@ describe("server webhook handling", () => {
       fetchMock.restore();
       state.close();
       delete process.env.LINEAR_API_KEY;
+    }
+  });
+
+  test("polls active Linear agent sessions and deduplicates queued work", async () => {
+    const fetchMock = mockDeferredFetch();
+    const state = await loadedState();
+    const queue = new FakeQueue();
+    state.saveLinearInstallation({
+      workspaceId: "org-1",
+      appUserId: "app-user-1",
+      accessToken: "lin_access",
+    });
+
+    try {
+      const pollPromise = pollLinearAgentSessionsOnce({ config, state, queue });
+      await waitFor(() => fetchMock.pending.length === 1);
+      expect(fetchMock.calls[0]).toMatchObject({
+        body: {
+          variables: { first: 20 },
+        },
+      });
+      fetchMock.resolveNext({
+        data: {
+          agentSessions: {
+            nodes: [
+              {
+                id: "sess_poll_1",
+                slugId: "slug-poll-1",
+                status: "active",
+                url: "https://linear.app/seventwo/issue/WEB-124#agent-session-sess_poll_1",
+                issue: {
+                  id: "issue-poll-1",
+                  identifier: "WEB-124",
+                  title: "Poll active agent sessions",
+                  description: "Use the web repository.",
+                  url: "https://linear.app/seventwo/issue/WEB-124",
+                  team: { id: "team-web", key: "WEB" },
+                  labels: { nodes: [{ name: "Delegated" }] },
+                },
+              },
+              {
+                id: "sess_poll_done",
+                status: "complete",
+                issue: {
+                  id: "issue-done",
+                  identifier: "WEB-123",
+                  title: "Already done",
+                  team: { id: "team-web", key: "WEB" },
+                  labels: { nodes: [] },
+                },
+              },
+            ],
+          },
+        },
+      });
+
+      await waitFor(() => fetchMock.pending.length === 1);
+      fetchMock.resolveNext({ data: { agentSessionUpdate: { success: true } } });
+      await waitFor(() => fetchMock.pending.length === 1);
+      fetchMock.resolveNext({ data: { agentActivityCreate: { success: true } } });
+      await waitFor(() => fetchMock.pending.length === 1);
+      fetchMock.resolveNext({
+        data: {
+          issue: {
+            id: "issue-poll-1",
+            identifier: "WEB-124",
+            state: { id: "state-start", name: "In Progress", type: "started" },
+            team: { id: "team-web" },
+            delegate: { id: "app-user-1" },
+          },
+        },
+      });
+      await waitFor(() => fetchMock.pending.length === 1);
+      fetchMock.resolveNext({ data: { agentSession: { activities: { edges: [] } } } });
+      await waitFor(() => fetchMock.pending.length === 1);
+      fetchMock.resolveNext({ data: { issueRepositorySuggestions: { suggestions: [] } } });
+      await waitFor(() => fetchMock.pending.length === 1);
+      fetchMock.resolveNext({ data: { agentSessionUpdate: { success: true } } });
+      await waitFor(() => fetchMock.pending.length === 1);
+      fetchMock.resolveNext({ data: { agentActivityCreate: { success: true } } });
+
+      expect(await pollPromise).toEqual({ inspected: 2, started: 1, skipped: 1 });
+      expect(queue.jobs).toHaveLength(1);
+      expect(queue.jobs[0]).toMatchObject({
+        sessionId: "sess_poll_1",
+        linearWorkspaceId: "org-1",
+        repo: { github: "lucasilverentand/web" },
+        issue: {
+          id: "issue-poll-1",
+          identifier: "WEB-124",
+          teamKey: "WEB",
+          labels: ["Delegated"],
+        },
+      });
+      expect(queue.jobs[0]?.prompt).toContain("WEB-124: Poll active agent sessions");
+      expect(state.getProcessedWebhook("linear-agent-session-poll:sess_poll_1")).toBeDefined();
+
+      const secondPollPromise = pollLinearAgentSessionsOnce({ config, state, queue });
+      await waitFor(() => fetchMock.pending.length === 1);
+      fetchMock.resolveNext({
+        data: {
+          agentSessions: {
+            nodes: [
+              {
+                id: "sess_poll_1",
+                status: "active",
+                issue: {
+                  id: "issue-poll-1",
+                  identifier: "WEB-124",
+                  title: "Poll active agent sessions",
+                  team: { id: "team-web", key: "WEB" },
+                  labels: { nodes: [] },
+                },
+              },
+            ],
+          },
+        },
+      });
+
+      expect(await secondPollPromise).toEqual({ inspected: 1, started: 0, skipped: 1 });
+      expect(queue.jobs).toHaveLength(1);
+    } finally {
+      fetchMock.restore();
+      state.close();
     }
   });
 

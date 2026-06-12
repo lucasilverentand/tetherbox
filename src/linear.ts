@@ -55,6 +55,14 @@ export interface LinearAgentSessionActivity {
   result?: string;
 }
 
+export interface LinearAgentSessionSummary {
+  id: string;
+  slugId?: string;
+  status?: string;
+  url?: string;
+  issue?: LinearIssueContext;
+}
+
 export type LinearManagementWebhook =
   | {
       type: "PermissionChange";
@@ -662,6 +670,79 @@ export async function listLinearAgentSessionActivities(
   }
 
   return activities.toSorted((left, right) => (left.updatedAt ?? "").localeCompare(right.updatedAt ?? ""));
+}
+
+export async function listLinearAgentSessions(
+  config: BridgeConfig,
+  tokenStore?: LinearTokenStore,
+  workspaceId?: string,
+  first = 20,
+): Promise<LinearAgentSessionSummary[]> {
+  const token = await getLinearAccessToken(config, tokenStore, workspaceId);
+  if (!token) {
+    logLinearFallback("agentSessions", { workspaceId, first });
+    return [];
+  }
+
+  const payload = await linearGraphql<{
+    agentSessions?: {
+      nodes?: Array<{
+        id?: string;
+        slugId?: string;
+        status?: string;
+        url?: string;
+        issue?: {
+          id?: string;
+          identifier?: string;
+          title?: string;
+          description?: string;
+          url?: string;
+          team?: { id?: string; key?: string };
+          labels?: { nodes?: Array<{ name?: string }> };
+        };
+      }>;
+    };
+  }>(token, config.linear.apiTimeoutMs, {
+    query: `query TetherboxAgentSessions($first: Int!) {
+      agentSessions(first: $first) {
+        nodes {
+          id
+          slugId
+          status
+          url
+          issue {
+            id
+            identifier
+            title
+            description
+            url
+            team {
+              id
+              key
+            }
+            labels {
+              nodes {
+                name
+              }
+            }
+          }
+        }
+      }
+    }`,
+    variables: {
+      first: Math.max(1, Math.min(first, 100)),
+    },
+  });
+
+  return (payload.agentSessions?.nodes ?? [])
+    .filter((session): session is NonNullable<typeof session> & { id: string } => typeof session?.id === "string" && session.id.length > 0)
+    .map((session) => ({
+      id: session.id,
+      ...(session.slugId ? { slugId: session.slugId } : {}),
+      ...(session.status ? { status: session.status } : {}),
+      ...(session.url ? { url: session.url } : {}),
+      ...(session.issue ? { issue: linearIssueContextFromAgentSessionIssue(session.issue) } : {}),
+    }));
 }
 
 export async function syncLinearIssueForAgentSession(
