@@ -84,6 +84,7 @@ export async function finalizeSuccessfulRun(
 
   await runner.run("git", ["add", "--all"], worktree.path);
   await createCommit(config, job, worktree, runner, warnings);
+  await setupGitHubGitCredentials(runner, worktree.path);
   await runGitPush(runner, worktree.branchName, worktree.path);
   const existing = await findExistingPullRequest(job.repo.github, worktree, runner);
   if (existing) {
@@ -154,6 +155,10 @@ async function runGitPush(
     }
     throw error;
   }
+}
+
+async function setupGitHubGitCredentials(runner: CommandRunner, cwd: string): Promise<void> {
+  await runGitHubCommand(runner, ["auth", "setup-git", "--hostname", "github.com"], cwd);
 }
 
 async function runGitHubCommand(

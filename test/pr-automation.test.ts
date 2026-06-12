@@ -65,6 +65,7 @@ describe("pull request automation", () => {
       { stdout: "", stderr: "" },
       { stdout: "", stderr: "" },
       { stdout: "", stderr: "" },
+      { stdout: "", stderr: "" },
       { stdout: "https://github.com/lucasilverentand/example/pull/42\n", stderr: "" },
     ]);
     runner.shellResults.push({ stdout: "tests passed\n", stderr: "" });
@@ -92,10 +93,17 @@ describe("pull request automation", () => {
       "git",
       "git",
       "git",
+      "gh",
       "git",
       "gh",
       "gh",
     ]);
+    expect(runner.commands).toContainEqual({
+      kind: "run",
+      command: "gh",
+      args: ["auth", "setup-git", "--hostname", "github.com"],
+      cwd: "/tmp/worktree",
+    });
     const commit = runner.commands.find(
       (command) => command.kind === "run" && command.command === "git" && command.args.includes("commit"),
     );
@@ -117,6 +125,7 @@ describe("pull request automation", () => {
   test("updates an existing PR for the branch instead of creating a duplicate", async () => {
     const runner = new FakeRunner([
       { stdout: " M src/app.ts\n", stderr: "" },
+      { stdout: "", stderr: "" },
       { stdout: "", stderr: "" },
       { stdout: "", stderr: "" },
       { stdout: "", stderr: "" },
@@ -153,6 +162,7 @@ describe("pull request automation", () => {
       { stdout: "", stderr: "" },
       { stdout: "", stderr: "" },
       { stdout: "", stderr: "" },
+      { stdout: "", stderr: "" },
       { stdout: "https://github.com/lucasilverentand/example/pull/42\n", stderr: "" },
     ]);
     runner.shellResults.push({ stdout: "", stderr: "" });
@@ -180,6 +190,7 @@ describe("pull request automation", () => {
   test("uses Git's configured signing key when signing with the configured key fails", async () => {
     const runner = new FakeRunner([
       { stdout: " M src/app.ts\n", stderr: "" },
+      { stdout: "", stderr: "" },
       { stdout: "", stderr: "" },
       { stdout: "", stderr: "" },
       { stdout: "", stderr: "" },
@@ -211,6 +222,7 @@ describe("pull request automation", () => {
       { stdout: "", stderr: "" },
       { stdout: "", stderr: "" },
       { stdout: "", stderr: "" },
+      { stdout: "", stderr: "" },
     ]);
     runner.shellResults.push({ stdout: "", stderr: "" });
     runner.failRunCommand = "gh";
@@ -226,6 +238,7 @@ describe("pull request automation", () => {
   test("classifies GitHub remote push authentication failures", async () => {
     const runner = new FakeRunner([
       { stdout: " M src/app.ts\n", stderr: "" },
+      { stdout: "", stderr: "" },
       { stdout: "", stderr: "" },
       { stdout: "", stderr: "" },
     ]);
