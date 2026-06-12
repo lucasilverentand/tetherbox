@@ -220,7 +220,7 @@ Worktree lifecycle:
 Commit rules:
 
 - Sign commits when `~/.ssh/codex_signing_key` is configured.
-- Co-author commits with Codex.
+- Co-author commits with the configured agent identity, Codex by default.
 - Record a warning and fall back to the worktree's Git signing config when the configured key is unavailable.
 - Fail before pushing or opening a PR when Git cannot create a signed commit.
 - Refuse to commit unrelated dirty changes in the source checkout.

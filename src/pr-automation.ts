@@ -323,7 +323,7 @@ function runSignedCommitWithKey(
       "-c",
       `user.signingKey=${signingKeyPath}`,
       ...gitAuthorConfigArgs(config),
-      ...commitArgs(job, true),
+      ...commitArgs(config, job, true),
     ],
     worktree.path,
   );
@@ -335,7 +335,7 @@ function runSignedCommitWithGitConfig(
   worktree: WorktreeInfo,
   runner: CommandRunner,
 ): Promise<CommandResult> {
-  return runner.run("git", [...gitAuthorConfigArgs(config), ...commitArgs(job, true)], worktree.path);
+  return runner.run("git", [...gitAuthorConfigArgs(config), ...commitArgs(config, job, true)], worktree.path);
 }
 
 function gitAuthorConfigArgs(config: BridgeConfig): string[] {
@@ -349,7 +349,7 @@ function gitConfigArg(key: string, value: string | undefined): string[] {
   return value ? ["-c", `${key}=${value}`] : [];
 }
 
-function commitArgs(job: RoutedJob, sign = false): string[] {
+function commitArgs(config: BridgeConfig, job: RoutedJob, sign = false): string[] {
   return [
     "commit",
     ...(sign ? ["-S"] : []),
@@ -358,8 +358,14 @@ function commitArgs(job: RoutedJob, sign = false): string[] {
     "-m",
     commitBody(job),
     "-m",
-    "Co-authored-by: Codex <codex@openai.com>",
+    coAuthorTrailer(config),
   ];
+}
+
+function coAuthorTrailer(config: BridgeConfig): string {
+  const name = config.git?.coAuthorName ?? "Codex";
+  const email = config.git?.coAuthorEmail ?? "codex@openai.com";
+  return `Co-authored-by: ${name} <${email}>`;
 }
 
 async function findExistingPullRequest(

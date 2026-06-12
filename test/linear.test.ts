@@ -1549,6 +1549,8 @@ describe("Linear webhook handling", () => {
     expect(loaded.git?.githubAuthUrl).toBe("https://github.example.test/device");
     expect(loaded.git?.authorName).toBe("Tetherbox");
     expect(loaded.git?.authorEmail).toBe("tetherbox@users.noreply.github.com");
+    expect(loaded.git?.coAuthorName).toBe("Codex");
+    expect(loaded.git?.coAuthorEmail).toBe("codex@openai.com");
   });
 
   test("times out stalled Linear GraphQL calls", async () => {
