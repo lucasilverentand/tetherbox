@@ -78,6 +78,28 @@ describe("CodexAppServerClient", () => {
     }));
   });
 
+  test("declines MCP elicitations without failing the turn", async () => {
+    const events: CodexAppServerLifecycleEvent[] = [];
+    const client = new CodexAppServerClient(await fakeCodex("elicitation-request"), {
+      turnTimeoutMs: 1_000,
+      onLifecycleEvent: (event) => events.push(event),
+    });
+
+    const threadId = await client.runTurn({
+      cwd: "/tmp",
+      input: "hello",
+      sandbox: "read-only",
+    });
+    client.stop();
+
+    expect(threadId).toBe("thread-1");
+    expect(events).toContainEqual({
+      level: "warn",
+      reason: "request_error",
+      message: "Declined Codex app-server MCP elicitation request in non-interactive mode",
+    });
+  });
+
   test("fails startup with a structured timeout reason", async () => {
     const client = new CodexAppServerClient(await fakeCodex("startup-timeout"), { startupTimeoutMs: 5 });
 
@@ -224,9 +246,37 @@ lines.on("line", (line) => {
       }));
       return;
     }
+    if (scenario === "elicitation-request") {
+      console.log(JSON.stringify({
+        id: 901,
+        method: "mcpServer/elicitation/request",
+        params: {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          serverName: "linear",
+          mode: "form",
+          message: "Need input",
+          requestedSchema: { type: "object", properties: {} },
+          _meta: null,
+        },
+      }));
+      return;
+    }
     if (scenario !== "turn-timeout") {
       console.log(JSON.stringify({ method: "turn/completed", params: {} }));
     }
+    return;
+  }
+  if (scenario === "elicitation-request" && message.id === 901) {
+    if (
+      message.result?.action !== "decline" ||
+      message.result?.content !== null ||
+      message.result?._meta !== null
+    ) {
+      console.log(JSON.stringify({ id: 902, error: { message: "expected declined elicitation result" } }));
+      return;
+    }
+    console.log(JSON.stringify({ method: "turn/completed", params: {} }));
   }
 });
 

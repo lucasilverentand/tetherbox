@@ -265,6 +265,23 @@ export class CodexAppServerClient {
   }
 
   private handleServerRequest(id: number, method: string): void {
+    if (method === "mcpServer/elicitation/request") {
+      this.emitLifecycle(
+        "warn",
+        "request_error",
+        "Declined Codex app-server MCP elicitation request in non-interactive mode",
+      );
+      this.write({
+        id,
+        result: {
+          action: "decline",
+          content: null,
+          _meta: null,
+        },
+      });
+      return;
+    }
+
     const error = new CodexAppServerError(
       "request_error",
       `Codex app-server requested unsupported interaction: ${method}`,
