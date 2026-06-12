@@ -45,6 +45,7 @@ The stack was checked as clean through PR #23. GitHub currently reports no check
 | Policy config v1 is available | PR #20 adds deterministic first-match policy rules for labels, paths, repos, teams, and priorities. | Ready in stack |
 | GitHub PR creation works when configured | `test/pr-automation.test.ts` covers validation commands, signed/co-authored commits, push, PR creation, and PR check watching. | Ready in stack |
 | Install and security docs are published | PR #22 adds `docs/setup.md` and `docs/security.md`, linked from `README.md`. | Ready in stack |
+| Native Linear webhook delivery reaches Tetherbox | `OSS-293` reached the live Tetherbox daemon through Linear native app delivery and started job `413bf36d-cf67-4067-a45a-50f99849438d-70106d54` without a manual signed replay. | Smoke passed |
 | A GitHub release is tagged and linked from Linear | No tag or GitHub release exists yet. This must happen after the prerequisite stack lands on `main`. | Pending |
 
 ## Final Release Steps
