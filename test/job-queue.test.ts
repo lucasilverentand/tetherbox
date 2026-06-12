@@ -182,11 +182,13 @@ describe("JobQueue", () => {
 
   test("times out jobs waiting for approval", async () => {
     const state = await loadedState();
+    const timers = new ManualTimers();
     const queue = new JobQueue({
       concurrency: 1,
       state,
+      timers,
       execute: async (job) => {
-        state.createApproval(job.id, "Run local Codex", new Date(Date.now() + 5).toISOString());
+        state.createApproval(job.id, "Run local Codex", new Date(Date.now() - 1).toISOString());
         return { status: "waiting_approval", message: "Approval required" };
       },
     });
@@ -194,6 +196,10 @@ describe("JobQueue", () => {
     await state.createJob(job);
 
     queue.enqueue(job);
+    await waitFor(() => state.snapshot().jobs[0]?.status === "waiting_approval");
+    expect(timers.delays).toEqual([0]);
+
+    timers.runAll();
     await waitFor(() => state.snapshot().jobs[0]?.status === "canceled");
     const record = state.snapshot().jobs[0];
 
@@ -271,5 +277,32 @@ async function waitFor(predicate: () => boolean): Promise<void> {
       throw new Error("Timed out waiting for condition");
     }
     await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+}
+
+class ManualTimers {
+  readonly delays: number[] = [];
+  private readonly timers = new Map<number, () => void>();
+  private nextId = 0;
+
+  setTimeout(callback: () => void, delayMs: number): number {
+    const id = ++this.nextId;
+    this.delays.push(delayMs);
+    this.timers.set(id, callback);
+    return id;
+  }
+
+  clearTimeout(timer: unknown): void {
+    if (typeof timer === "number") {
+      this.timers.delete(timer);
+    }
+  }
+
+  runAll(): void {
+    const callbacks = [...this.timers.values()];
+    this.timers.clear();
+    for (const callback of callbacks) {
+      callback();
+    }
   }
 }

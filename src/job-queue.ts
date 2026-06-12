@@ -5,11 +5,17 @@ export interface JobQueueOptions {
   concurrency: number;
   state: StateStore;
   execute: (job: RoutedJob, signal: AbortSignal) => Promise<JobQueueResult>;
+  timers?: JobQueueTimers;
 }
 
 export interface JobQueueResult {
   status: "completed" | "waiting_approval" | "denied";
   message: string;
+}
+
+export interface JobQueueTimers {
+  setTimeout: (callback: () => void, delayMs: number) => unknown;
+  clearTimeout: (timer: unknown) => void;
 }
 
 export interface ShutdownOptions {
@@ -33,12 +39,17 @@ export class JobQueue {
   private accepting = true;
   private readonly pending: RoutedJob[] = [];
   private readonly running = new Map<string, RunningJob>();
-  private readonly approvalTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly approvalTimers = new Map<string, unknown>();
+  private readonly timers: JobQueueTimers;
 
   constructor(private readonly options: JobQueueOptions) {
     if (!Number.isInteger(options.concurrency) || options.concurrency < 1) {
       throw new Error("Queue concurrency must be at least 1");
     }
+    this.timers = options.timers ?? {
+      setTimeout: (callback, delayMs) => setTimeout(callback, delayMs),
+      clearTimeout: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>),
+    };
     this.options.state.markRunningJobsInterrupted();
     this.scheduleExistingApprovalTimeouts();
   }
@@ -165,14 +176,14 @@ export class JobQueue {
 
     const existing = this.approvalTimers.get(jobId);
     if (existing) {
-      clearTimeout(existing);
+      this.timers.clearTimeout(existing);
     }
     const expiresAt = Date.parse(approval.expiresAt);
     if (Number.isNaN(expiresAt)) {
       return;
     }
     const delay = Math.max(0, expiresAt - Date.now());
-    const timer = setTimeout(() => {
+    const timer = this.timers.setTimeout(() => {
       void this.expireApproval(jobId);
     }, delay);
     this.approvalTimers.set(jobId, timer);
@@ -193,7 +204,7 @@ export class JobQueue {
 
   private clearApprovalTimers(): void {
     for (const timer of this.approvalTimers.values()) {
-      clearTimeout(timer);
+      this.timers.clearTimeout(timer);
     }
     this.approvalTimers.clear();
   }
