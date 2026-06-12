@@ -29,6 +29,8 @@ export async function loadConfig(path: string): Promise<BridgeConfig> {
       webhookMaxAgeMs: parsed.linear.webhookMaxAgeMs ?? 60_000,
       apiTimeoutMs: parsed.linear.apiTimeoutMs ?? 8_000,
       agentActivityHistoryLimit: parsed.linear.agentActivityHistoryLimit ?? 100,
+      agentSessionPollIntervalMs: parsed.linear.agentSessionPollIntervalMs ?? 0,
+      agentSessionPollFirst: parsed.linear.agentSessionPollFirst ?? 20,
       reviewStateName: parsed.linear.reviewStateName ?? "In Review",
     },
     queue: {

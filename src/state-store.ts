@@ -707,6 +707,13 @@ export class StateStore {
     return row ? linearInstallationFromRow(row) : undefined;
   }
 
+  listLinearInstallations(): LinearInstallationRecord[] {
+    const rows = this.requireDb()
+      .query("select * from workspace_installations order by workspace_id = 'default', workspace_id")
+      .all() as LinearInstallationRow[];
+    return rows.map(linearInstallationFromRow);
+  }
+
   deleteLinearInstallation(workspaceId = "default"): void {
     this.requireDb().query("delete from workspace_installations where workspace_id = ?").run(workspaceId);
   }
