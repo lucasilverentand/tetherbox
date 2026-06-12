@@ -68,6 +68,8 @@ describe("runJob", () => {
       status: "completed",
       message: "Codex turn completed",
     });
+    expect(client.turns[0]?.input).toContain("do not commit, push, or open a pull request");
+    expect(client.turns[0]?.input).toContain("Tetherbox will validate, sign, commit, push, and open the pull request");
     expect(event).toMatchObject({
       level: "warn",
       message: "Git signing key not found at /tmp/key; trying Git's configured signing key.",
@@ -236,6 +238,10 @@ describe("runJob", () => {
     ).rejects.toThrow("requires a pull request");
 
     const snapshot = state.snapshot();
+    expect(client.turns[0]?.input).toContain(
+      "Leave a concrete repository diff in the worktree so Tetherbox can publish it",
+    );
+    expect(client.turns[0]?.input).not.toContain("Produce a concrete repository change so Tetherbox can validate");
     state.close();
 
     expect(snapshot.events).toContainEqual(expect.objectContaining({

@@ -361,9 +361,9 @@ function buildCodexPrompt(job: RoutedJob, planOnly: boolean): string {
     `Repository: ${job.repo.github}`,
     planOnly
       ? "Policy mode: plan-only. Inspect the repository and produce an implementation plan only. Do not edit files, run write-capable commands, commit, push, or open a pull request."
-      : "Policy mode: implementation. If the Linear task asks for a change, validation, commit, or pull request, make the required repository change before finishing. Do not report success with a clean worktree when a pull request is part of the request.",
+      : "Policy mode: implementation. Edit repository files as needed, but do not commit, push, or open a pull request. Tetherbox will validate, sign, commit, push, and open the pull request after your turn.",
     !planOnly && jobRequiresPullRequest(job)
-      ? "This task appears to require a pull request. Produce a concrete repository change so Tetherbox can validate, commit, push, and open the PR."
+      ? "This task appears to require a pull request. Leave a concrete repository diff in the worktree so Tetherbox can publish it; do not report success with a clean worktree."
       : undefined,
     "",
     job.prompt,
