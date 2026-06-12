@@ -42,6 +42,8 @@ export interface BridgeConfig {
   git?: {
     signingKeyPath?: string;
     githubAuthUrl?: string;
+    authorName?: string;
+    authorEmail?: string;
   };
   repos: RepoMapping[];
   policies: PolicyRule[];

@@ -104,6 +104,8 @@ describe("pull request automation", () => {
         "-c",
         "gpg.format=ssh",
         "user.signingKey=/tmp/codex_signing_key",
+        "user.name=Tetherbox",
+        "user.email=tetherbox@users.noreply.github.com",
         "commit",
         "-S",
         "-m",
@@ -157,7 +159,7 @@ describe("pull request automation", () => {
 
     const result = await finalizeSuccessfulRun(signedConfig, job, worktree, runner);
     const commit = runner.commands.find(
-      (command) => command.kind === "run" && command.command === "git" && command.args[0] === "commit",
+      (command) => command.kind === "run" && command.command === "git" && command.args.includes("commit"),
     );
 
     expect(result.warnings).toEqual([
@@ -169,6 +171,8 @@ describe("pull request automation", () => {
     }
     expect(commit.args).toContain("commit");
     expect(commit.args).toContain("-S");
+    expect(commit.args).toContain("user.name=Tetherbox");
+    expect(commit.args).toContain("user.email=tetherbox@users.noreply.github.com");
     expect(commit.args).toContain("Co-authored-by: Codex <codex@openai.com>");
     expect(commit.args).not.toContain("user.signingKey=/tmp/codex_signing_key");
   });
