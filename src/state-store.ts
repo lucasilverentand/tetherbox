@@ -628,6 +628,17 @@ export class StateStore {
     }
   }
 
+  async clearSessionThreadId(sessionId: string, jobId?: string): Promise<void> {
+    const now = new Date().toISOString();
+    const result = this.requireDb()
+      .query("update sessions set codex_thread_id = null, updated_at = ? where id = ? and codex_thread_id is not null")
+      .run(now, sessionId);
+
+    if (result.changes > 0) {
+      await this.addEvent("warn", "Cleared stale Codex thread for Linear session", jobId, "codex");
+    }
+  }
+
   createLinearOAuthState(state: string, redirectUri: string, expiresAt: string): void {
     const now = new Date().toISOString();
     this.requireDb()
