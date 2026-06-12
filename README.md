@@ -80,6 +80,7 @@ Example service definitions live in `examples/`:
 
 - `dev.tetherbox.plist` for macOS `launchd`.
 - `tetherbox.service` for Linux `systemd --user`.
+- `fake-website/index.html` as a harmless static site fixture for Tetherbox validation smoke tests.
 
 Run the daemon as the same user that owns Codex auth, GitHub auth, SSH keys, and local repository checkouts.
 
