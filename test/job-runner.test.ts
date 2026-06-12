@@ -2,6 +2,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
+import { CodexAppServerError } from "../src/codex-app-server";
 import { runJob } from "../src/job-runner";
 import { GitHubAuthenticationRequiredError, ValidationFailedError } from "../src/pr-automation";
 import { StateStore } from "../src/state-store";
@@ -199,6 +200,88 @@ describe("runJob", () => {
       state.close();
       delete process.env.LINEAR_API_KEY;
     }
+  });
+
+  test("fails no-change runs when the Linear task requires a pull request", async () => {
+    const state = new StateStore(await statePath());
+    await state.load();
+    const prJob: RoutedJob = {
+      ...autoJob,
+      prompt: `${autoJob.prompt}\nOpen a pull request after making the requested documentation change.`,
+      issue: {
+        ...autoJob.issue,
+        description: "Make a docs change and open a PR.",
+      },
+    };
+    await state.createJob(prJob);
+    const client = new FakeCodexClient();
+
+    await expect(
+      runJob(config, prJob, state, {
+        createClient: () => client,
+        prepareWorktree: async () => worktree,
+        finalizeRun: async () => ({
+          status: "no_changes",
+          validation: [
+            {
+              command: "bun test",
+              status: "passed",
+              stdout: "2 pass",
+              stderr: "",
+              summary: "2 pass",
+            },
+          ],
+        }),
+      }),
+    ).rejects.toThrow("requires a pull request");
+
+    const snapshot = state.snapshot();
+    state.close();
+
+    expect(snapshot.events).toContainEqual(expect.objectContaining({
+      source: "validation",
+      level: "info",
+      message: "Validation passed: bun test\n2 pass",
+      jobId: "job-2",
+    }));
+    expect(snapshot.events).toContainEqual(expect.objectContaining({
+      source: "git",
+      level: "error",
+      message: "Codex completed without file changes, but this Linear task requires a pull request.",
+      jobId: "job-2",
+    }));
+  });
+
+  test("starts a fresh Codex thread when a stored thread is missing", async () => {
+    const state = new StateStore(await statePath());
+    await state.load();
+    await state.createJob(autoJob);
+    await state.setSessionThreadId(autoJob.sessionId, "thread-stale", autoJob.id);
+    const client = new MissingThreadOnceCodexClient();
+
+    const result = await runJob(config, autoJob, state, {
+      createClient: () => client,
+      prepareWorktree: async () => worktree,
+      finalizeRun: async () => ({ status: "no_changes" }),
+    });
+    const snapshot = state.snapshot();
+    const threadId = state.getSessionThreadId(autoJob.sessionId);
+    state.close();
+
+    expect(result).toEqual({
+      status: "completed",
+      message: "Codex turn completed",
+    });
+    expect(client.turns).toHaveLength(2);
+    expect(client.turns[0]?.threadId).toBe("thread-stale");
+    expect(client.turns[1]?.threadId).toBeUndefined();
+    expect(threadId).toBe("thread-fresh");
+    expect(snapshot.events).toContainEqual(expect.objectContaining({
+      source: "codex",
+      level: "warn",
+      message: "Stored Codex thread thread-stale was not found; starting a fresh thread for this Linear session.",
+      jobId: "job-2",
+    }));
   });
 
   test("pauses with a Linear auth signal when GitHub authentication is required", async () => {
@@ -552,6 +635,27 @@ class FakeCodexClient {
 
   stop(): void {
     this.stopped = true;
+  }
+}
+
+class MissingThreadOnceCodexClient extends FakeCodexClient {
+  private failed = false;
+
+  override async runTurn(options: {
+    cwd: string;
+    input: string;
+    threadId?: string;
+    model?: string;
+    sandbox: SandboxMode;
+    onNotification?: (notification: CodexNotification) => void;
+  }): Promise<string> {
+    this.turns.push(options);
+    if (options.threadId && !this.failed) {
+      this.failed = true;
+      throw new CodexAppServerError("request_error", `Codex app-server request failed: thread not found: ${options.threadId}`);
+    }
+    options.onNotification?.({ method: "turn/completed", params: {} });
+    return "thread-fresh";
   }
 }
 

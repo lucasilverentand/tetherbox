@@ -1,4 +1,4 @@
-import { CodexAppServerClient } from "./codex-app-server";
+import { CodexAppServerClient, CodexAppServerError } from "./codex-app-server";
 import { JobCanceledError, type JobQueueResult } from "./job-queue";
 import {
   moveLinearIssueToReviewState,
@@ -181,6 +181,11 @@ export async function runJob(
           body: checks.summary,
         });
       }
+    } else if (jobRequiresPullRequest(job)) {
+      const message = "Codex completed without file changes, but this Linear task requires a pull request.";
+      await state.addEvent("error", message, job.id, "git");
+      await postActivity(config, state, job, { type: "error", body: message });
+      throw new Error(message);
     } else {
       await postActivity(config, state, job, {
         type: "thought",
@@ -306,19 +311,44 @@ async function runCodexTurn(
     ephemeral: true,
   });
   const existingThreadId = state.getSessionThreadId(job.sessionId);
-  const threadId = await client.runTurn({
-    cwd: options.cwd,
-    input: options.prompt,
-    threadId: existingThreadId,
-    model: config.codex.model,
-    sandbox: options.sandbox,
-    onNotification: (notification) => {
-      if (notification.method) {
-        void state.addEvent("info", `Codex: ${notification.method}`, job.id, "codex");
-      }
-    },
-  });
-  if (!existingThreadId) {
+  let threadId: string;
+  try {
+    threadId = await client.runTurn({
+      cwd: options.cwd,
+      input: options.prompt,
+      threadId: existingThreadId,
+      model: config.codex.model,
+      sandbox: options.sandbox,
+      onNotification: (notification) => {
+        if (notification.method) {
+          void state.addEvent("info", `Codex: ${notification.method}`, job.id, "codex");
+        }
+      },
+    });
+  } catch (error) {
+    if (!existingThreadId || !isMissingCodexThreadError(error)) {
+      throw error;
+    }
+    await state.addEvent(
+      "warn",
+      `Stored Codex thread ${existingThreadId} was not found; starting a fresh thread for this Linear session.`,
+      job.id,
+      "codex",
+    );
+    await state.clearSessionThreadId(job.sessionId);
+    threadId = await client.runTurn({
+      cwd: options.cwd,
+      input: options.prompt,
+      model: config.codex.model,
+      sandbox: options.sandbox,
+      onNotification: (notification) => {
+        if (notification.method) {
+          void state.addEvent("info", `Codex: ${notification.method}`, job.id, "codex");
+        }
+      },
+    });
+  }
+  if (!existingThreadId || threadId !== existingThreadId) {
     await state.setSessionThreadId(job.sessionId, threadId, job.id);
   }
 }
@@ -331,12 +361,32 @@ function buildCodexPrompt(job: RoutedJob, planOnly: boolean): string {
     `Repository: ${job.repo.github}`,
     planOnly
       ? "Policy mode: plan-only. Inspect the repository and produce an implementation plan only. Do not edit files, run write-capable commands, commit, push, or open a pull request."
+      : "Policy mode: implementation. If the Linear task asks for a change, validation, commit, or pull request, make the required repository change before finishing. Do not report success with a clean worktree when a pull request is part of the request.",
+    !planOnly && jobRequiresPullRequest(job)
+      ? "This task appears to require a pull request. Produce a concrete repository change so Tetherbox can validate, commit, push, and open the PR."
       : undefined,
     "",
     job.prompt,
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+function isMissingCodexThreadError(error: unknown): boolean {
+  return error instanceof CodexAppServerError
+    && error.reason === "request_error"
+    && /thread not found/i.test(error.message);
+}
+
+function jobRequiresPullRequest(job: RoutedJob): boolean {
+  const text = [job.issue.title, job.issue.description, job.prompt].filter(Boolean).join("\n").toLowerCase();
+  if (/\bno\s+pull\s+request\b|\bno\s+pr\b|\bwithout\s+(?:opening|creating)\s+(?:a\s+)?(?:pull\s+request|pr)\b/.test(text)) {
+    return false;
+  }
+  return /\b(?:open|opened|create|created|publish|published)\s+(?:a\s+)?(?:pull\s+request|pr)\b/.test(text)
+    || /\b(?:pull\s+request|pr)\s+(?:is|was|must be|should be)\s+(?:opened|created|published)\b/.test(text)
+    || /\brequires?\s+(?:a\s+)?(?:pull\s+request|pr)\b/.test(text)
+    || /\bpr\s+link\b/.test(text);
 }
 
 function throwIfCanceled(signal?: AbortSignal): void {
