@@ -1,0 +1,32 @@
+{
+  "name": "tetherbox",
+  "version": "0.1.0",
+  "description": "Run local Codex App Server work from Linear agent sessions.",
+  "type": "module",
+  "private": false,
+  "license": "MIT",
+  "bin": {
+    "tetherbox": "./src/index.ts"
+  },
+  "scripts": {
+    "start": "bun run src/index.ts daemon --config examples/config.json",
+    "daemon": "bun run src/index.ts daemon --config examples/config.json",
+    "tui": "bun run src/index.ts tui --url http://127.0.0.1:8787",
+    "generate:codex-protocol": "bun run scripts/generate-codex-protocol.ts",
+    "install:macos": "bun run scripts/install-macos.ts",
+    "uninstall:macos": "bun run scripts/uninstall-macos.ts",
+    "install:linux": "bun run scripts/install-linux.ts",
+    "uninstall:linux": "bun run scripts/uninstall-linux.ts",
+    "test": "bun test",
+    "check": "bun test && bun run scripts/check-format.ts"
+  },
+  "engines": {
+    "bun": ">=1.3.0"
+  },
+  "keywords": [
+    "codex",
+    "linear",
+    "agent",
+    "app-server"
+  ]
+}
